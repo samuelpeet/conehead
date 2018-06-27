@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.linalg import inv
 
 
 class Source:
@@ -35,7 +36,7 @@ class Source:
         assert theta >= 0 and theta < 360, "Invalid gantry angle"
 
         # Set new source position
-        theta = (90 - theta) % 360  # IEC 61217
+        theta = (90 - theta) % 360  # From IEC 61217 to global
         x = self._sad * np.cos(theta * np.pi / 180)
         y = self._sad * np.sin(theta * np.pi / 180)
         z = self.position[2]
@@ -58,7 +59,7 @@ class Source:
         assert theta >= 0 and theta < 360, "Invalid collimator angle"
 
         rx = self.rotation[0]
-        ry = (360 - theta) * np.pi / 180
+        ry = (360 - theta) * np.pi / 180  # From IEC 61217 to global
         rz = self.rotation[2]
         self.rotation = np.array([rx, ry, rz])
 
@@ -66,6 +67,14 @@ class Source:
 def beam_to_global(beam_coords, source_position, source_rotation):
     """Transform from beam coordinates to global coordinates.
 
+    Computes coordinate transformation:
+
+    G = Rz * Ry * B + S
+
+    where B is the point in beam coordinates, Rz and Ry are rotation matrices
+    about their respective (global) axes, and S is the location of the source
+    in global coordinates.
+    
     Parameters
     ----------
     beam_coords : ndarray
@@ -103,12 +112,20 @@ def beam_to_global(beam_coords, source_position, source_rotation):
     return global_coords
 
 
-def global_to_beam(geometry_coords, source_position, source_rotation):
+def global_to_beam(global_coords, source_position, source_rotation):
     """Transform from global coordinates to beam coordinates.
+
+    Computes coordinate transformation:
+
+    B = inv(Rz) * inv(Rz) * (B - S)
+
+    where G is the point in global coordinates, Rz and Ry are rotation matrices
+    about their respective (global) axes, and S is the location of the source
+    in global coordinates.
 
     Parameters
     ----------
-    geometry_coords : ndarray
+    global_coords : ndarray
         The coordinates in the global geometry to be transformed.
     source_position : ndarray
         The position of the source in global coordinates
@@ -120,4 +137,24 @@ def global_to_beam(geometry_coords, source_position, source_rotation):
     ndarray
         The global coordinates transformed into the beam geometry.
     """
-    assert NotImplementedError
+    (rx, ry, rz) = source_rotation
+    # (cx, sx) = (np.cos(rx), np.sin(rx))
+    (cy, sy) = (np.cos(ry), np.sin(ry))
+    (cz, sz) = (np.cos(rz), np.sin(rz))
+
+    # Perform translation
+    beam_coords = global_coords - source_position
+
+    # Rotate about z-axis (gantry)
+    rot_z_matrix = np.array([[cz, -sz, 0],
+                             [sz, cz, 0],
+                             [0, 0, 1]])
+    beam_coords = np.matmul(inv(rot_z_matrix), beam_coords)
+
+    # Rotate about y-axis (collimator)
+    rot_y_matrix = np.array([[cy, 0, sy],
+                             [0, 1, 0],
+                             [-sy, 0, cy]])
+    beam_coords = np.matmul(inv(rot_y_matrix), beam_coords)
+
+    return beam_coords
