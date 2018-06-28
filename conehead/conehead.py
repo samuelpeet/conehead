@@ -8,6 +8,7 @@ class Source:
         self._sad = 1000
         self._position = np.array([0, self._sad, 0])
         self._rotation = np.array([0, 0, np.pi])
+        self._block_plane = np.zeros((400, 400))
 
     @property
     def position(self):
@@ -24,6 +25,14 @@ class Source:
     @rotation.setter
     def rotation(self, new_rotation):
         self._rotation = new_rotation
+    
+    @property
+    def block_plane(self):
+        return self._block_plane
+    
+    @block_plane.setter
+    def block_plane(self, new_block_plane):
+        self._block_plane = new_block_plane
 
     def gantry(self, theta):
         """ Set the gantry angle of the source.
@@ -74,7 +83,7 @@ def beam_to_global(beam_coords, source_position, source_rotation):
     where B is the point in beam coordinates, Rz and Ry are rotation matrices
     about their respective (global) axes, and S is the location of the source
     in global coordinates.
-    
+
     Parameters
     ----------
     beam_coords : ndarray
