@@ -31,7 +31,9 @@ class TestSourceMovements:
     def test_gantry_225(self):
         source = Source()
         source.gantry(225)
-        correct_pos = np.array([-np.cos(np.pi/4)*1000, 0, -np.cos(np.pi/4)*1000])
+        correct_pos = np.array(
+            [-np.cos(np.pi/4)*1000, 0, -np.cos(np.pi/4)*1000]
+        )
         np.testing.assert_array_almost_equal(
             correct_pos, source.position, decimal=5
         )

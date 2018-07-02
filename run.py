@@ -3,13 +3,13 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
 from conehead.source import Source
 from conehead.geometry import (
-    beam_to_global, global_to_beam, line_plane_collision
+    global_to_beam, line_plane_collision
 )
 
 
 # Create source
 source = Source()
-source.gantry(270)
+source.gantry(0)
 source.collimator(0)
 
 # Set 100 mm x 100 mm collimator opening
@@ -26,7 +26,7 @@ source.block_plane_values_interp = RegularGridInterpolator(
 )
 
 # Create slab phantom in global coords
-phantom = np.mgrid[-200:200:41j, -200:200:41j, -200:200:41j]
+phantom = np.mgrid[-200:200:41j, -200:200:41j, -400:0:41j]
 
 # Transform phantom to beam coords
 phantom_beam = np.zeros_like(phantom)
@@ -38,29 +38,52 @@ for x in range(41):
                 source.position,
                 source.rotation
             )
+# Create dose grid (just the same size as the phantom for now)
+dose_grid_positions = np.copy(phantom_beam)
 
-# Perform hit testing to find which voxels are in the beam
-_, xlen, ylen, zlen = phantom_beam.shape
-phantom_blocked = np.zeros((xlen, ylen, zlen))
+# Perform hit testing to find which dose grid voxels are in the beam
+_, xlen, ylen, zlen = dose_grid_positions.shape
+dose_grid_blocked = np.zeros((xlen, ylen, zlen))
 for x in range(xlen):
     for y in range(ylen):
         for z in range(zlen):
-            voxel = phantom_beam[:, x, y, z]
+            voxel = dose_grid_positions[:, x, y, z]
             psi = line_plane_collision(voxel)
-            phantom_blocked[x, y, z] = source.block_plane_values_interp(
+            dose_grid_blocked[x, y, z] = source.block_plane_values_interp(
                [psi[0], psi[1]]
-            ) + np.random.random_sample()*0.2
+            )
+
+# Calculate photon fluence
+S_pri = 1.0  # Primary source strength (photons/mm^2)
+dose_grid_fluence = np.zeros_like(dose_grid_blocked)
+for x in range(xlen):
+    for y in range(ylen):
+        for z in range(zlen):
+            dose_grid_fluence[x, y, z] = S_pri
+            dose_grid_fluence[x, y, z] *= (-1000 / dose_grid_positions[2, x, y, z])
+            dose_grid_fluence[x, y, z] *= dose_grid_blocked[x, y, z]
+            # dose_grid_fluence[x, y, z] += np.random.random_sample()*0.1
 
 # Plotting for debug purposes
 f = plt.figure()
 ax = plt.gca()
 ax.imshow(
-    np.rot90(phantom_blocked[:, 20, :]),
-    extent=[-205, 205, -205, 205],
+    np.rot90(dose_grid_fluence[:, 20, :]),
+    extent=[-205, 205, -405, 5],
     aspect='equal'
 )
 # # Minor ticks
 # ax.set_xticks(np.arange(-97.5, 100, 5), minor=True)
 # ax.set_yticks(np.arange(-390, 400, 20), minor=True)
 # ax.grid(which="minor", color="w", linestyle='-', linewidth=1)
+
+f = plt.figure()
+ax2 = plt.gca()
+ax2.plot((dose_grid_positions[2, 20, 20, :] + 1000) * -1, dose_grid_fluence[20, 20, :] / np.max(dose_grid_fluence[20, 20, :]) * 100, label='Fluence')
+ax2.set_xlim([0, 400])
+ax2.set_ylim([0, 100])
+ax2.set_title("Central Axis Quantites")
+ax2.set_xlabel("Depth [mm]")
+ax2.set_ylabel("Relative Value [%]")
+ax2.legend()
 plt.show()

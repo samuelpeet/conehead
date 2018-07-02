@@ -24,14 +24,18 @@ class Source:
     @rotation.setter
     def rotation(self, new_rotation):
         self._rotation = new_rotation
-    
+
     @property
     def block_plane(self):
         return self._block_plane
-    
+
     @block_plane.setter
     def block_plane(self, new_block_plane):
         self._block_plane = new_block_plane
+
+    @property
+    def sad(self):
+        return self._sad
 
     def gantry(self, theta):
         """ Set the gantry angle of the source.
