@@ -1,11 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
-from conehead.conehead import Source, beam_to_global, global_to_beam
+from conehead.source import Source
+from conehead.geometry import (
+    beam_to_global, global_to_beam, line_plane_collision
+)
+
 
 # Create source
 source = Source()
-source.gantry(0)
+source.gantry(270)
 source.collimator(0)
 
 # Set 100 mm x 100 mm collimator opening
@@ -21,55 +25,41 @@ source.block_plane_values_interp = RegularGridInterpolator(
     fill_value=0
 )
 
-# Create slab phantom
-phantom = np.mgrid[-100:100:41j, -400:400:41j, -100:100:41j]
+# Create slab phantom in global coords
+phantom = np.mgrid[-200:200:41j, -200:200:41j, -200:200:41j]
 
+# Transform phantom to beam coords
+phantom_beam = np.zeros_like(phantom)
+for x in range(41):
+    for y in range(41):
+        for z in range(41):
+            phantom_beam[:, x, y, z] = global_to_beam(
+                phantom[:, x, y, z],
+                source.position,
+                source.rotation
+            )
 
-def line_plane_collision(plane_normal, plane_point, ray_direction, ray_point,
-                         epsilon=1e-6):
-
-    ndotu = plane_normal.dot(ray_direction)
-    if abs(ndotu) < epsilon:
-        raise RuntimeError("no intersection or line is within plane")
-
-    w = ray_point - plane_point
-    si = -plane_normal.dot(w) / ndotu
-    psi = w + si * ray_direction + plane_point
-    return psi
-
-
-# Define plane
-plane_normal = np.array([0, 1, 0])
-plane_point = np.array([0, 0, 0])  # Any point on the plane
-
-# Define ray
-ray_point = source.position  # Any point along the ray
-
-_, xlen, ylen, zlen = phantom.shape
+# Perform hit testing to find which voxels are in the beam
+_, xlen, ylen, zlen = phantom_beam.shape
 phantom_blocked = np.zeros((xlen, ylen, zlen))
+for x in range(xlen):
+    for y in range(ylen):
+        for z in range(zlen):
+            voxel = phantom_beam[:, x, y, z]
+            psi = line_plane_collision(voxel)
+            phantom_blocked[x, y, z] = source.block_plane_values_interp(
+               [psi[0], psi[1]]
+            ) + np.random.random_sample()*0.2
 
-for i in range(xlen):
-    for j in range(ylen):
-        for k in range(zlen):
-            voxel = phantom[:, i, j, k]
-            ray_direction = voxel - source.position
-            psi = line_plane_collision(
-                plane_normal, plane_point, ray_direction, ray_point
-            )
-            phantom_blocked[i, j, k] = source.block_plane_values_interp(
-               [psi[0], psi[2]]
-            )
-# print("intersection at", psi)
-# print("voxel position", voxel)
-
+# Plotting for debug purposes
 f = plt.figure()
 ax = plt.gca()
 ax.imshow(
-    np.flipud(phantom_blocked[20, :, :]),
-    extent=[-102.5, 102.5, -410, 410],
-    aspect='auto'
+    np.rot90(phantom_blocked[:, 20, :]),
+    extent=[-205, 205, -205, 205],
+    aspect='equal'
 )
-# Minor ticks
+# # Minor ticks
 # ax.set_xticks(np.arange(-97.5, 100, 5), minor=True)
 # ax.set_yticks(np.arange(-390, 400, 20), minor=True)
 # ax.grid(which="minor", color="w", linestyle='-', linewidth=1)

@@ -1,5 +1,6 @@
 import numpy as np
-from conehead.conehead import Source, beam_to_global, global_to_beam
+from conehead.source import Source
+from conehead.geometry import beam_to_global, global_to_beam
 
 
 class TestSourceMovements:

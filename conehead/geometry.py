@@ -2,77 +2,6 @@ import numpy as np
 from numpy.linalg import inv
 
 
-class Source:
-
-    def __init__(self):
-        self._sad = 1000
-        self._position = np.array([0, 0, self._sad])
-        self._rotation = np.array([0, 0, 0])
-        self._block_plane = np.zeros((400, 400))
-
-    @property
-    def position(self):
-        return self._position
-
-    @position.setter
-    def position(self, new_postion):
-        self._position = new_postion
-
-    @property
-    def rotation(self):
-        return self._rotation
-
-    @rotation.setter
-    def rotation(self, new_rotation):
-        self._rotation = new_rotation
-    
-    @property
-    def block_plane(self):
-        return self._block_plane
-    
-    @block_plane.setter
-    def block_plane(self, new_block_plane):
-        self._block_plane = new_block_plane
-
-    def gantry(self, theta):
-        """ Set the gantry angle of the source.
-
-        Parameters
-        ----------
-        theta : float
-            The gantry angle in degrees. Must be within the range [0, 360).
-        """
-        assert theta >= 0 and theta < 360, "Invalid gantry angle"
-
-        # Set new source position
-        phi = (90 - theta) % 360  # IEC 61217
-        x = self._sad * np.cos(phi * np.pi / 180)
-        y = self.position[1]
-        z = self._sad * np.sin(phi * np.pi / 180)
-        self.position = np.array([x, y, z])
-
-        # Set new source rotation
-        rx = self.rotation[0]
-        ry = (0 - theta) % 360 * np.pi / 180
-        rz = self.rotation[2]
-        self.rotation = np.array([rx, ry, rz])
-
-    def collimator(self, theta):
-        """ Set the collimator angle of the source.
-
-        Parameters
-        ----------
-        theta : float
-            The collimator angle in degrees. Must be within the range [0, 360).
-        """
-        assert theta >= 0 and theta < 360, "Invalid collimator angle"
-
-        rx = self.rotation[0]
-        ry = self.rotation[1]
-        rz = theta * np.pi / 180
-        self.rotation = np.array([rx, ry, rz])
-
-
 def beam_to_global(beam_coords, source_position, source_rotation):
     """Transform from beam coordinates to global coordinates.
 
@@ -167,3 +96,32 @@ def global_to_beam(global_coords, source_position, source_rotation):
     beam_coords = np.matmul(inv(rot_z_matrix), beam_coords)
 
     return beam_coords
+
+
+def line_plane_collision(ray_direction, epsilon=1e-6):
+    """ Calculate the point of intersection of a line and plane.
+
+     Parameters
+    ----------
+    ray_direction : ndarray
+        Direction vector of ray, normalisation not necessary
+    epsilon : float
+        Cutoff to determine if ray intersects with plane
+
+    Returns
+    -------
+    ndarray
+        Coordinates of line plane intersection
+
+    """
+    plane_normal = np.array([0, 0, 1]) # Always towards source
+    plane_point = plane_point = np.array([0, 0, -1000])  # Isocentre
+    ray_point = np.array([0, 0, 0])  # Source position
+
+    ndotu = plane_normal.dot(ray_direction)
+    if abs(ndotu) < epsilon:
+        raise RuntimeError("no intersection or line is within plane")
+    w = ray_point - plane_point
+    si = -plane_normal.dot(w) / ndotu
+    psi = w + si * ray_direction + plane_point
+    return psi
