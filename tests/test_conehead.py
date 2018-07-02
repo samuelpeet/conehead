@@ -6,11 +6,11 @@ class TestSourceMovements:
     def test_gantry_0(self):
         source = Source()
         source.gantry(0)
-        correct_pos = np.array([0, 1000, 0])
+        correct_pos = np.array([0, 0, 1000])
         np.testing.assert_array_almost_equal(
             correct_pos, source.position, decimal=5
         )
-        correct_rot = np.array([0, 0, np.pi])
+        correct_rot = np.array([0, 0, 0])
         np.testing.assert_array_almost_equal(
             correct_rot, source.rotation, decimal=5
         )
@@ -18,11 +18,11 @@ class TestSourceMovements:
     def test_gantry_45(self):
         source = Source()
         source.gantry(45)
-        correct_pos = np.array([np.cos(np.pi/4)*1000, np.cos(np.pi/4)*1000, 0])
+        correct_pos = np.array([np.cos(np.pi/4)*1000, 0, np.sin(np.pi/4)*1000])
         np.testing.assert_array_almost_equal(
             correct_pos, source.position, decimal=5
         )
-        correct_rot = np.array([0, 0, np.pi*3/4])
+        correct_rot = np.array([0, np.pi*7/4, 0])
         np.testing.assert_array_almost_equal(
             correct_rot, source.rotation, decimal=5
         )
@@ -30,13 +30,11 @@ class TestSourceMovements:
     def test_gantry_225(self):
         source = Source()
         source.gantry(225)
-        correct_pos = np.array(
-            [-np.cos(np.pi/4)*1000, -np.cos(np.pi/4)*1000, 0]
-        )
+        correct_pos = np.array([-np.cos(np.pi/4)*1000, 0, -np.cos(np.pi/4)*1000])
         np.testing.assert_array_almost_equal(
             correct_pos, source.position, decimal=5
         )
-        correct_rot = np.array([0, 0, np.pi*7/4])
+        correct_rot = np.array([0, np.pi*3/4, 0])
         np.testing.assert_array_almost_equal(
             correct_rot, source.rotation, decimal=5
         )
@@ -48,7 +46,7 @@ class TestSourceMovements:
         np.testing.assert_array_almost_equal(
             correct_pos, source.position, decimal=5
         )
-        correct_rot = np.array([0, 0, np.pi*3/2])
+        correct_rot = np.array([0, np.pi/2, 0])
         np.testing.assert_array_almost_equal(
             correct_rot, source.rotation, decimal=5
         )
@@ -56,7 +54,7 @@ class TestSourceMovements:
     def test_collimator_90(self):
         source = Source()
         source.collimator(90)
-        correct_rot = np.array([0, np.pi * 3 / 2, np.pi])
+        correct_rot = np.array([0, 0, np.pi/2])
         np.testing.assert_array_almost_equal(
             correct_rot, source.rotation, decimal=5
         )
@@ -64,7 +62,7 @@ class TestSourceMovements:
     def test_collimator_270(self):
         source = Source()
         source.collimator(270)
-        correct_rot = np.array([0, np.pi / 2, np.pi])
+        correct_rot = np.array([0, 0, np.pi*3/2])
         np.testing.assert_array_almost_equal(
             correct_rot, source.rotation, decimal=5
         )
@@ -80,7 +78,7 @@ class TestCoordinateTranformations:
         global_coords = beam_to_global(
             beam_coords, source.position, source.rotation
         )
-        correct = np.array([-1, 998, 3])
+        correct = np.array([1, 2, 1003])
         np.testing.assert_array_almost_equal(correct, global_coords, decimal=5)
 
     def test_beam_to_global_G90_C0(self):
@@ -88,11 +86,11 @@ class TestCoordinateTranformations:
         source = Source()
         source.gantry(90)
         source.collimator(0)
-        beam_coords = np.array([1, 2, 0])
+        beam_coords = np.array([1, 2, 3])
         global_coords = beam_to_global(
             beam_coords, source.position, source.rotation
         )
-        correct = np.array([998, 1, 0])
+        correct = np.array([1003, 2, -1])
         np.testing.assert_array_almost_equal(correct, global_coords, decimal=5)
 
     def test_beam_to_global_G270_C0(self):
@@ -104,7 +102,7 @@ class TestCoordinateTranformations:
         global_coords = beam_to_global(
             beam_coords, source.position, source.rotation
         )
-        correct = np.array([-998, -1, 3])
+        correct = np.array([-1003, 2, 1])
         np.testing.assert_array_almost_equal(correct, global_coords, decimal=5)
 
     def test_beam_to_global_G0_C90(self):
@@ -116,7 +114,7 @@ class TestCoordinateTranformations:
         global_coords = beam_to_global(
             beam_coords, source.position, source.rotation
         )
-        correct = np.array([3, 998, 1])
+        correct = np.array([-2, 1, 1003])
         np.testing.assert_array_almost_equal(correct, global_coords, decimal=5)
 
     def test_beam_to_global_G270_C270(self):
@@ -128,7 +126,7 @@ class TestCoordinateTranformations:
         global_coords = beam_to_global(
             beam_coords, source.position, source.rotation
         )
-        correct = np.array([-998, -3, -1])
+        correct = np.array([-1003, -1, 2])
         np.testing.assert_array_almost_equal(correct, global_coords, decimal=5)
 
     def test_global_to_beam_G0_C0(self):
@@ -140,7 +138,7 @@ class TestCoordinateTranformations:
         beam_coords = global_to_beam(
             global_coords, source.position, source.rotation
         )
-        correct = np.array([-1, 998, 3])
+        correct = np.array([1, 2, -997])
         np.testing.assert_array_almost_equal(correct, beam_coords, decimal=5)
 
     def test_global_to_beam_G90_C0(self):
@@ -152,7 +150,7 @@ class TestCoordinateTranformations:
         beam_coords = global_to_beam(
             global_coords, source.position, source.rotation
         )
-        correct = np.array([2, 999, 3])
+        correct = np.array([-3, 2, -999])
         np.testing.assert_array_almost_equal(correct, beam_coords, decimal=5)
 
     def test_global_to_beam_G270_C0(self):
@@ -164,7 +162,7 @@ class TestCoordinateTranformations:
         beam_coords = global_to_beam(
             global_coords, source.position, source.rotation
         )
-        correct = np.array([-2, 1001, 3])
+        correct = np.array([3, 2, -1001])
         np.testing.assert_array_almost_equal(correct, beam_coords, decimal=5)
 
     def test_global_to_beam_G0_C90(self):
@@ -176,7 +174,7 @@ class TestCoordinateTranformations:
         beam_coords = global_to_beam(
             global_coords, source.position, source.rotation
         )
-        correct = np.array([3, 998, 1])
+        correct = np.array([2, -1, -997])
         np.testing.assert_array_almost_equal(correct, beam_coords, decimal=5)
 
     def test_global_to_beam_G270_C270(self):
@@ -188,5 +186,5 @@ class TestCoordinateTranformations:
         beam_coords = global_to_beam(
             global_coords, source.position, source.rotation
         )
-        correct = np.array([-3, 1001, -2])
+        correct = np.array([-2, 3, -1001])
         np.testing.assert_array_almost_equal(correct, beam_coords, decimal=5)

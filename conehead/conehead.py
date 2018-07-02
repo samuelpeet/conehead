@@ -6,8 +6,8 @@ class Source:
 
     def __init__(self):
         self._sad = 1000
-        self._position = np.array([0, self._sad, 0])
-        self._rotation = np.array([0, 0, np.pi])
+        self._position = np.array([0, 0, self._sad])
+        self._rotation = np.array([0, 0, 0])
         self._block_plane = np.zeros((400, 400))
 
     @property
@@ -45,16 +45,16 @@ class Source:
         assert theta >= 0 and theta < 360, "Invalid gantry angle"
 
         # Set new source position
-        theta = (90 - theta) % 360  # From IEC 61217 to global
-        x = self._sad * np.cos(theta * np.pi / 180)
-        y = self._sad * np.sin(theta * np.pi / 180)
-        z = self.position[2]
+        phi = (90 - theta) % 360  # IEC 61217
+        x = self._sad * np.cos(phi * np.pi / 180)
+        y = self.position[1]
+        z = self._sad * np.sin(phi * np.pi / 180)
         self.position = np.array([x, y, z])
 
         # Set new source rotation
         rx = self.rotation[0]
-        ry = self.rotation[1]
-        rz = (90 + theta) % 360 * np.pi / 180
+        ry = (0 - theta) % 360 * np.pi / 180
+        rz = self.rotation[2]
         self.rotation = np.array([rx, ry, rz])
 
     def collimator(self, theta):
@@ -68,19 +68,19 @@ class Source:
         assert theta >= 0 and theta < 360, "Invalid collimator angle"
 
         rx = self.rotation[0]
-        ry = (360 - theta) * np.pi / 180  # From IEC 61217 to global
-        rz = self.rotation[2]
+        ry = self.rotation[1]
+        rz = theta * np.pi / 180
         self.rotation = np.array([rx, ry, rz])
 
 
 def beam_to_global(beam_coords, source_position, source_rotation):
     """Transform from beam coordinates to global coordinates.
 
-    Computes coordinate transformation:
+    Compute coordinate transformation:
 
-    G = Rz * Ry * B + S
+    G = Ry * Rz * B + S
 
-    where B is the point in beam coordinates, Rz and Ry are rotation matrices
+    where B is the point in beam coordinates, Ry and Rz are rotation matrices
     about their respective (global) axes, and S is the location of the source
     in global coordinates.
 
@@ -100,20 +100,20 @@ def beam_to_global(beam_coords, source_position, source_rotation):
     """
     (rx, ry, rz) = source_rotation
     # (cx, sx) = (np.cos(rx), np.sin(rx))
-    (cy, sy) = (np.cos(ry), np.sin(ry))
+    (cy, sy) = (np.cos(-ry), np.sin(-ry))
     (cz, sz) = (np.cos(rz), np.sin(rz))
 
-    # Rotate about y-axis (collimator)
-    rot_y_matrix = np.array([[cy, 0, sy],
-                             [0, 1, 0],
-                             [-sy, 0, cy]])
-    global_coords = np.matmul(rot_y_matrix, beam_coords)
-
-    # Rotate about z-axis (gantry)
+    # Rotate about z-axis (collimator)
     rot_z_matrix = np.array([[cz, -sz, 0],
                              [sz, cz, 0],
                              [0, 0, 1]])
-    global_coords = np.matmul(rot_z_matrix, global_coords)
+    global_coords = np.matmul(rot_z_matrix, beam_coords)
+
+    # Rotate about y-axis (gantry)
+    rot_y_matrix = np.array([[cy, 0, sy],
+                             [0, 1, 0],
+                             [-sy, 0, cy]])
+    global_coords = np.matmul(rot_y_matrix, global_coords)
 
     # Perform translation
     global_coords = source_position + global_coords
@@ -126,7 +126,7 @@ def global_to_beam(global_coords, source_position, source_rotation):
 
     Computes coordinate transformation:
 
-    B = inv(Rz) * inv(Rz) * (B - S)
+    B = inv(Rz) * inv(Ry) * (B - S)
 
     where G is the point in global coordinates, Rz and Ry are rotation matrices
     about their respective (global) axes, and S is the location of the source
@@ -148,22 +148,22 @@ def global_to_beam(global_coords, source_position, source_rotation):
     """
     (rx, ry, rz) = source_rotation
     # (cx, sx) = (np.cos(rx), np.sin(rx))
-    (cy, sy) = (np.cos(ry), np.sin(ry))
+    (cy, sy) = (np.cos(-ry), np.sin(-ry))
     (cz, sz) = (np.cos(rz), np.sin(rz))
 
     # Perform translation
     beam_coords = global_coords - source_position
 
-    # Rotate about z-axis (gantry)
-    rot_z_matrix = np.array([[cz, -sz, 0],
-                             [sz, cz, 0],
-                             [0, 0, 1]])
-    beam_coords = np.matmul(inv(rot_z_matrix), beam_coords)
-
-    # Rotate about y-axis (collimator)
+    # Rotate about y-axis (gantry)
     rot_y_matrix = np.array([[cy, 0, sy],
                              [0, 1, 0],
                              [-sy, 0, cy]])
     beam_coords = np.matmul(inv(rot_y_matrix), beam_coords)
+
+    # Rotate about z-axis (collimator)
+    rot_z_matrix = np.array([[cz, -sz, 0],
+                             [sz, cz, 0],
+                             [0, 0, 1]])
+    beam_coords = np.matmul(inv(rot_z_matrix), beam_coords)
 
     return beam_coords
