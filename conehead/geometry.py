@@ -98,8 +98,8 @@ def global_to_beam(global_coords, source_position, source_rotation):
     return beam_coords
 
 
-def line_plane_collision(ray_direction, epsilon=1e-6):
-    """ Calculate the point of intersection of a line and plane.
+def line_block_plane_collision(ray_direction, epsilon=1e-6):
+    """ Calculate the point of intersection of a line and the blocking plane.
 
      Parameters
     ----------
@@ -112,10 +112,38 @@ def line_plane_collision(ray_direction, epsilon=1e-6):
     -------
     ndarray
         Coordinates of line plane intersection
-
     """
     plane_normal = np.array([0, 0, 1])  # Always towards source
     plane_point = plane_point = np.array([0, 0, -1000])  # Isocentre
+    ray_point = np.array([0, 0, 0])  # Source position
+
+    ndotu = plane_normal.dot(ray_direction)
+    if abs(ndotu) < epsilon:
+        raise RuntimeError("no intersection or line is within plane")
+    w = ray_point - plane_point
+    si = -plane_normal.dot(w) / ndotu
+    psi = w + si * ray_direction + plane_point
+    return psi
+
+
+def line_calc_limit_plane_collision(ray_direction, epsilon=1e-6):
+    """ Calculate the point of intersection of a line and the calculation
+    limit plane.
+
+     Parameters
+    ----------
+    ray_direction : ndarray
+        Direction vector of ray, normalisation not necessary
+    epsilon : float
+        Cutoff to determine if ray intersects with plane
+
+    Returns
+    -------
+    ndarray
+        Coordinates of line plane intersection
+    """
+    plane_normal = np.array([0, 0, 1])  # Always towards source
+    plane_point = plane_point = np.array([0, 0, -500])  # Half iso for now
     ray_point = np.array([0, 0, 0])  # Source position
 
     ndotu = plane_normal.dot(ray_direction)
