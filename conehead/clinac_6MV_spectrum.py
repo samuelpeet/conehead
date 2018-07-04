@@ -6,7 +6,7 @@ import numpy as np
 from conehead.nist import mu_W, mu_Al
 
 
-def psi_E(E):
+def weights(E):
     # Equation 12 of Table 2.
     C_1 = 1.222
     C_2 = 5.147
