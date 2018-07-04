@@ -12,7 +12,16 @@ def psi_E(E):
     C_2 = 5.147
     C_3 = -1.186
     E_e = 5.76
-    psi_thin = (1 + C_3 * E / E_e + np.power(E / E_e, 2)) * (np.log(E_e * (E_e - E) / E + 1.65) - 0.5)
-    result = psi_thin * np.exp(-mu_W(E) * np.power(C_1, 2) - mu_Al(E) * np.power(C_2, 2))
-    result[result < 0] = 0
-    return result
+    psi_thin = (1 + C_3 * E / E_e + np.power(E / E_e, 2)) * \
+               (np.log(E_e * (E_e - E) / E + 1.65) - 0.5)
+    psi = psi_thin * np.exp(-mu_W(E) * np.power(C_1, 2) - mu_Al(E) *
+                            np.power(C_2, 2))
+
+    # Set negative results to zero
+    psi[psi < 0] = 0
+
+    # Normalise the curve
+    N = np.trapz(psi, x=E)
+    psi /= N
+
+    return psi

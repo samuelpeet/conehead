@@ -4,10 +4,10 @@ import numpy as np
 class Source:
 
     def __init__(self):
-        self._sad = 1000
+        self._sad = 100
         self._position = np.array([0, 0, self._sad])
         self._rotation = np.array([0, 0, 0])
-        self._block_plane = np.zeros((400, 400))
+        self._block_plane = np.zeros((40, 40))
 
     @property
     def position(self):

@@ -1,11 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
+from scipy.spatial.distance import euclidean
+from tqdm import tqdm
 from conehead.source import Source
 from conehead.geometry import (
     global_to_beam, line_block_plane_collision, line_calc_limit_plane_collision
 )
-
+from conehead.nist import mu_water
+from conehead.clinac_6MV_spectrum import psi_E
 
 # Create source
 source = Source()
@@ -13,12 +16,12 @@ source.gantry(0)
 source.collimator(0)
 
 # Set 100 mm x 100 mm collimator opening
-block_plane_locations = np.mgrid[-200:200:400j, -200:200:400j]
+block_plane_locations = np.mgrid[-20:20:40j, -20:20:40j]
 block_plane_values = np.zeros((400, 400))
-block_plane_values[150:250, 150:250, ] = 1
+block_plane_values[150:250, 150:250] = 1
 source.block_plane_values = block_plane_values
 source.block_plane_values_interp = RegularGridInterpolator(
-    (np.linspace(-200, 200, 400), np.linspace(-200, 200, 400)),
+    (np.linspace(-20, 20, 400), np.linspace(-20, 20, 400)),
     block_plane_values,
     method='nearest',
     bounds_error=False,
@@ -26,14 +29,16 @@ source.block_plane_values_interp = RegularGridInterpolator(
 )
 
 # Create slab phantom in global coords
-phantom_positions = np.mgrid[-200:200:41j, -200:200:41j, -400:0:41j]
+print("Creating phantom...")
+phantom_positions = np.mgrid[-20:20:41j, -20:20:41j, -40:0:41j]
 _, xlen, ylen, zlen = phantom_positions.shape
 phantom_densities = np.ones((xlen, ylen, zlen))  # Water
-phantom_densities[15:26, 15:26, 15:26] = 4  # Higher density feature
+# phantom_densities[15:26, 15:26, 15:26] = 4  # Higher density feature
 
 # Transform phantom to beam coords
+print("Transforming phatntom to beam coords...")
 phantom_beam = np.zeros_like(phantom_positions)
-for x in range(41):
+for x in tqdm(range(41)):
     for y in range(41):
         for z in range(41):
             phantom_beam[:, x, y, z] = global_to_beam(
@@ -41,6 +46,7 @@ for x in range(41):
                 source.position,
                 source.rotation
             )
+print("Interpolating phantom densities...")
 phantom_densities_interp = RegularGridInterpolator(
     (phantom_beam[0, :, 0, 0],
      phantom_beam[1, 0, :, 0],
@@ -55,9 +61,11 @@ phantom_densities_interp = RegularGridInterpolator(
 dose_grid_positions = np.copy(phantom_beam)
 
 # Perform hit testing to find which dose grid voxels are in the beam
+print("Performing voxel hit-testing...")
 _, xlen, ylen, zlen = dose_grid_positions.shape
 dose_grid_blocked = np.zeros((xlen, ylen, zlen))
-for x in range(xlen):
+dose_grid_OAD = np.zeros((xlen, ylen, zlen))
+for x in tqdm(range(xlen)):
     for y in range(ylen):
         for z in range(zlen):
             voxel = dose_grid_positions[:, x, y, z]
@@ -65,26 +73,30 @@ for x in range(xlen):
             dose_grid_blocked[x, y, z] = source.block_plane_values_interp(
                [psi[0], psi[1]]
             )
+            # Save off-axis distance (at iso plane) for later
+            dose_grid_OAD[x, y, z] = euclidean(np.array([0, 0, -100]), psi)
 
-# Calculate photon fluence
+# Calculate photon fluence at dose grid voxels
+print("Calculating fluence...")
 S_pri = 1.0  # Primary source strength (photons/mm^2)
 dose_grid_fluence = np.zeros_like(dose_grid_blocked)
 xlen, ylen, zlen = dose_grid_fluence.shape
-for x in range(xlen):
+for x in tqdm(range(xlen)):
     for y in range(ylen):
         for z in range(zlen):
             dose_grid_fluence[x, y, z] = S_pri
             dose_grid_fluence[x, y, z] *= (
-                -1000 / dose_grid_positions[2, x, y, z]
+                -100 / dose_grid_positions[2, x, y, z]
             )
             dose_grid_fluence[x, y, z] *= dose_grid_blocked[x, y, z]
             # dose_grid_fluence[x, y, z] += np.random.random_sample()*0.1
 
 # Calculate effective depths of dose grid voxels
-step_size = 1  # mm
+print("Calculating effective depths...")
+step_size = 0.1  # mm
 dose_grid_d_eff = np.zeros_like(dose_grid_blocked)
 xlen, ylen, zlen = dose_grid_d_eff.shape
-for x in range(xlen):
+for x in tqdm(range(xlen)):
     for y in range(ylen):
         for z in range(zlen):
             voxel = dose_grid_positions[:, x, y, z]
@@ -100,31 +112,63 @@ for x in range(xlen):
                 ) * step_size
             )
 
+# Calculate beam softening factor for dose grid voxels
+print("Calculating beam softening factor...")
+f_softening_ratio = 0.0025  # mm^-1
+r_limit = 20  # mm
+f_soften = np.ones_like(dose_grid_OAD)
+f_soften[dose_grid_OAD < r_limit] = 1 / (
+    1 - f_softening_ratio * dose_grid_OAD[dose_grid_OAD < r_limit])
+
+# Calculate TERMA of dose grid voxels
+print("Calculating TERMA...")
+E = np.linspace(0.01, 7, 500)
+dose_grid_terma = np.zeros_like(dose_grid_blocked)
+xlen, ylen, zlen = dose_grid_terma.shape
+for x in tqdm(range(xlen)):
+    for y in range(ylen):
+        for z in range(zlen):
+            dose_grid_terma[x, y, z] = (
+                np.sum(
+                    psi_E(E) * dose_grid_fluence[x, y, z] *
+                    np.exp(
+                        -mu_water(E) * f_soften[x, y, z] *
+                        dose_grid_d_eff[x, y, z]
+                    ) * E * mu_water(E)
+                )
+            )
+
 # Plotting for debug purposes
+print("Calculation complete. Now plotting...")
 f1 = plt.figure()
 ax = plt.gca()
 im = ax.imshow(
-    np.rot90(dose_grid_d_eff[:, 20, :]),
-    extent=[-205, 205, -405, 5],
+    np.rot90(dose_grid_terma[:, 20, :]),
+    extent=[-20.5, 20.5, -40.5, .5],
     aspect='equal'
 )
 # Minor ticks
-ax.set_xticks(np.arange(-195, 200, 10), minor=True)
-ax.set_yticks(np.arange(-395, 0, 10), minor=True)
+ax.set_xticks(np.arange(-19.5, 20.0, 1.0), minor=True)
+ax.set_yticks(np.arange(-39.5, 0, 1.0), minor=True)
 ax.grid(which="minor", color="black", linestyle='-', linewidth=1)
 plt.colorbar(im)
 
 f2 = plt.figure()
 ax2 = plt.gca()
 ax2.plot(
-    (dose_grid_positions[2, 20, 20, :] + 1000) * -1, 
+    -dose_grid_positions[2, 20, 20, :] - 100,
     dose_grid_fluence[20, 20, :] / np.max(dose_grid_fluence[20, 20, :]) * 100,
     label='Fluence'
 )
-ax2.set_xlim([0, 400])
+ax2.plot(
+    -dose_grid_positions[2, 20, 20, :] - 100,
+    dose_grid_terma[20, 20, :] / np.max(dose_grid_terma[20, 20, :]) * 100,
+    label='TERMA'
+)
+ax2.set_xlim([0, 40.0])
 ax2.set_ylim([0, 100])
 ax2.set_title("Central Axis Quantites")
-ax2.set_xlabel("Depth [mm]")
+ax2.set_xlabel("Depth [cm]")
 ax2.set_ylabel("Relative Value [%]")
 ax2.legend()
 plt.show()
