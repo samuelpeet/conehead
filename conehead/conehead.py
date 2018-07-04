@@ -9,7 +9,6 @@ from conehead.geometry import (
 )
 import conehead.nist
 import conehead.clinac_6MV_spectrum
-import multiprocessing
 
 
 def run():
@@ -42,14 +41,15 @@ def run():
     # Transform phantom to beam coords
     print("Transforming phantom to beam coords...")
     phantom_beam = np.zeros_like(phantom_positions)
-    for x in tqdm(range(41)):
-        for y in range(41):
-            for z in range(41):
+    for x in tqdm(range(xlen)):
+        for y in range(ylen):
+            for z in range(zlen):
                 phantom_beam[:, x, y, z] = global_to_beam(
                     phantom_positions[:, x, y, z],
                     source.position,
                     source.rotation
                 )
+
     print("Interpolating phantom densities...")
     phantom_densities_interp = RegularGridInterpolator(
         (phantom_beam[0, :, 0, 0],
@@ -65,56 +65,43 @@ def run():
     dose_grid_positions = np.copy(phantom_beam)
 
     # Perform hit testing to find which dose grid voxels are in the beam
+    print("Performing hit-testing of dose grid voxels...")
     _, xlen, ylen, zlen = dose_grid_positions.shape
     dose_grid_blocked = np.zeros((xlen, ylen, zlen))
     dose_grid_OAD = np.zeros((xlen, ylen, zlen))
-
-    def hit_test():  # Wrap for multiprocessing
-        for x in range(xlen):
-            for y in range(ylen):
-                for z in range(zlen):
-                    voxel = dose_grid_positions[:, x, y, z]
-                    psi = line_block_plane_collision(voxel)
-                    dose_grid_blocked[x, y, z] = (
-                        source.block_plane_values_interp([psi[0], psi[1]])
-                    )
-                    # Save off-axis distance (at iso plane) for later
-                    dose_grid_OAD[x, y, z] = (
-                        euclidean(np.array([0, 0, -100]), psi)
-                    )
-    hit_test_process = multiprocessing.Process(target=hit_test)
+    for x in tqdm(range(xlen)):
+        for y in range(ylen):
+            for z in range(zlen):
+                voxel = dose_grid_positions[:, x, y, z]
+                psi = line_block_plane_collision(voxel)
+                dose_grid_blocked[x, y, z] = (
+                    source.block_plane_values_interp([psi[0], psi[1]])
+                )
+                # Save off-axis distance (at iso plane) for later
+                dose_grid_OAD[x, y, z] = (
+                    euclidean(np.array([0, 0, -100]), psi)
+                )
 
     # Calculate effective depths of dose grid voxels
+    print("Calculating effective depths of dose grid voxels...")
     step_size = 0.1  # cm
     dose_grid_d_eff = np.zeros_like(dose_grid_blocked)
     xlen, ylen, zlen = dose_grid_d_eff.shape
-    dose_grid_positions_copy = np.copy(dose_grid_positions)
-
-    def d_eff():  # Wrap for multiprocessing
-        for x in tqdm(range(xlen)):
-            for y in range(ylen):
-                for z in range(zlen):
-                    voxel = dose_grid_positions_copy[:, x, y, z]
-                    psi = line_calc_limit_plane_collision(voxel)
-                    dist = np.sqrt(np.sum(np.power(voxel - psi, 2)))
-                    num_steps = np.floor(dist / step_size)
-                    xcoords = np.linspace(voxel[0], psi[0], num_steps)
-                    ycoords = np.linspace(voxel[1], psi[1], num_steps)
-                    zcoords = np.linspace(voxel[2], psi[2], num_steps)
-                    dose_grid_d_eff[x, y, z] = np.sum(
-                        phantom_densities_interp(
-                            np.dstack((xcoords, ycoords, zcoords))
-                        ) * step_size
-                    )
-    d_eff_process = multiprocessing.Process(target=d_eff)
-
-    # Kick off concurrent processes
-    print("Performing hit-testing & "
-          "calculating effective depths concurrently...")
-    hit_test_process.start()
-    d_eff_process.start()
-    hit_test_process.join()
-    d_eff_process.join()
+    for x in tqdm(range(xlen)):
+        for y in range(ylen):
+            for z in range(zlen):
+                voxel = dose_grid_positions[:, x, y, z]
+                psi = line_calc_limit_plane_collision(voxel)
+                dist = np.sqrt(np.sum(np.power(voxel - psi, 2)))
+                num_steps = np.floor(dist / step_size)
+                xcoords = np.linspace(voxel[0], psi[0], num_steps)
+                ycoords = np.linspace(voxel[1], psi[1], num_steps)
+                zcoords = np.linspace(voxel[2], psi[2], num_steps)
+                dose_grid_d_eff[x, y, z] = np.sum(
+                    phantom_densities_interp(
+                        np.dstack((xcoords, ycoords, zcoords))
+                    ) * step_size
+                )
 
     # Calculate photon fluence at dose grid voxels
     print("Calculating fluence...")
