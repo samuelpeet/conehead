@@ -3,11 +3,16 @@ import numpy as np
 
 class Source:
 
-    def __init__(self):
-        self._sad = 100
-        self._position = np.array([0, 0, self._sad])
+    def __init__(self, source, SAD=100):
+        self._SAD = SAD
+        self._position = np.array([0, 0, self._SAD])
         self._rotation = np.array([0, 0, 0])
-        self._block_plane = np.zeros((40, 40))
+
+        if source == "varian_clinac_6MV":
+            import conehead.varian_clinac_6MV
+            self.weights = conehead.varian_clinac_6MV.weights
+        else:
+            NotImplementedError("The requested source is not yet implemented.")
 
     @property
     def position(self):
@@ -26,16 +31,8 @@ class Source:
         self._rotation = new_rotation
 
     @property
-    def block_plane(self):
-        return self._block_plane
-
-    @block_plane.setter
-    def block_plane(self, new_block_plane):
-        self._block_plane = new_block_plane
-
-    @property
-    def sad(self):
-        return self._sad
+    def SAD(self):
+        return self._SAD
 
     def gantry(self, theta):
         """ Set the gantry angle of the source.
@@ -49,9 +46,9 @@ class Source:
 
         # Set new source position
         phi = (90 - theta) % 360  # IEC 61217
-        x = self._sad * np.cos(phi * np.pi / 180)
+        x = self._SAD * np.cos(phi * np.pi / 180)
         y = self.position[1]
-        z = self._sad * np.sin(phi * np.pi / 180)
+        z = self._SAD * np.sin(phi * np.pi / 180)
         self.position = np.array([x, y, z])
 
         # Set new source rotation

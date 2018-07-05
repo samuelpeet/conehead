@@ -3,51 +3,25 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
 from scipy.spatial.distance import euclidean
 from tqdm import tqdm
-from conehead.source import Source
 from conehead.geometry import (
     global_to_beam, line_block_plane_collision, line_calc_limit_plane_collision
 )
 import conehead.nist
-import conehead.clinac_6MV_spectrum
 
 
 class Conehead:
 
-    def calculate(self, settings):
-
-        # Create source
-        source = Source()
-        source.gantry(settings['gantryAngle'])
-        source.collimator(settings['collimatorAngle'])
-
-        # Set 100 mm x 100 mm collimator opening
-        block_plane_locations = np.mgrid[-20:20:40j, -20:20:40j]
-        block_plane_values = np.zeros((400, 400))
-        block_plane_values[150:250, 150:250] = 1
-        source.block_plane_values = block_plane_values
-        source.block_plane_values_interp = RegularGridInterpolator(
-            (np.linspace(-20, 20, 400), np.linspace(-20, 20, 400)),
-            block_plane_values,
-            method='nearest',
-            bounds_error=False,
-            fill_value=0
-        )
-
-        # Create slab phantom in global coords
-        print("Creating phantom...")
-        phantom_positions = np.mgrid[-20:20:41j, -20:20:41j, -40:0:41j]
-        _, xlen, ylen, zlen = phantom_positions.shape
-        phantom_densities = np.ones((xlen, ylen, zlen))  # Water
-        # phantom_densities[15:26, 15:26, 15:26] = 4  # Higher density feature
+    def calculate(self, source, block, phantom, settings):
 
         # Transform phantom to beam coords
         print("Transforming phantom to beam coords...")
-        phantom_beam = np.zeros_like(phantom_positions)
+        phantom_beam = np.zeros_like(phantom.positions)
+        _, xlen, ylen, zlen = phantom_beam.shape
         for x in tqdm(range(xlen)):
             for y in range(ylen):
                 for z in range(zlen):
                     phantom_beam[:, x, y, z] = global_to_beam(
-                        phantom_positions[:, x, y, z],
+                        phantom.positions[:, x, y, z],
                         source.position,
                         source.rotation
                     )
@@ -57,7 +31,7 @@ class Conehead:
             (phantom_beam[0, :, 0, 0],
              phantom_beam[1, 0, :, 0],
              phantom_beam[2, 0, 0, :]),
-            phantom_densities,
+            phantom.densities,
             method='nearest',
             bounds_error=False,
             fill_value=0
@@ -77,11 +51,11 @@ class Conehead:
                     voxel = self.dose_grid_positions[:, x, y, z]
                     psi = line_block_plane_collision(voxel)
                     dose_grid_blocked[x, y, z] = (
-                        source.block_plane_values_interp([psi[0], psi[1]])
+                        block.block_values_interp([psi[0], psi[1]])
                     )
                     # Save off-axis distance (at iso plane) for later
                     dose_grid_OAD[x, y, z] = (
-                        euclidean(np.array([0, 0, -settings['SAD']]), psi)
+                        euclidean(np.array([0, 0, source.SAD]), psi)
                     )
 
         # Calculate effective depths of dose grid voxels
@@ -109,7 +83,7 @@ class Conehead:
         self.dose_grid_fluence = np.zeros_like(dose_grid_blocked)
         xlen, ylen, zlen = self.dose_grid_fluence.shape
         self.dose_grid_fluence = (
-            settings['sPri'] * -settings['SAD'] /
+            settings['sPri'] * -source.SAD /
             self.dose_grid_positions[2, :, :, :] *
             dose_grid_blocked
         )
@@ -125,7 +99,7 @@ class Conehead:
         # Calculate TERMA of dose grid voxels
         print("Calculating TERMA...")
         E = np.linspace(settings['eLow'], settings['eHigh'], settings['eNum'])
-        spectrum_weights = conehead.clinac_6MV_spectrum.weights(E)
+        spectrum_weights = source.weights(E)
         mu_water = conehead.nist.mu_water(E)
         self.dose_grid_terma = np.zeros_like(dose_grid_blocked)
         xlen, ylen, zlen = self.dose_grid_terma.shape
