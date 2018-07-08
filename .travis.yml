@@ -7,4 +7,4 @@ install:
     - python setup.py build_ext --inplace
 
 script:
-- pytest
+- python3 -m pytest /tests
