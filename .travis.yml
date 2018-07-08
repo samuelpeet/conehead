@@ -9,5 +9,5 @@ install:
 script:
 - python3 -m pytest tests/
 
-after_succes:
+after_success:
 - bash <(curl -s https://codecov.io/bash)
