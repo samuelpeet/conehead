@@ -37,7 +37,7 @@ def weights(E):
         psi /= N
     else:
         # Probably just a single float
-        if psi < 0:
+        if psi < 0 or np.isnan(psi):
             psi = 0
         psi = np.array(psi)
 

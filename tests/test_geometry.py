@@ -1,6 +1,10 @@
+import pytest
 import numpy as np
 from conehead.source import Source
-from conehead.geometry import beam_to_global, global_to_beam
+from conehead.geometry import (
+    beam_to_global, global_to_beam, line_block_plane_collision,
+    line_calc_limit_plane_collision
+)
 
 
 class TestGeometry:
@@ -123,3 +127,25 @@ class TestGeometry:
         )
         correct = np.array([-.2, .3, -100.1])
         np.testing.assert_array_almost_equal(correct, beam_coords, decimal=5)
+
+    def test_line_block_plane_collision(self):
+        ray_direction = np.array([0, 0, -1])
+        point = line_block_plane_collision(ray_direction)
+        correct = np.array([0, 0, -100])
+        np.testing.assert_array_almost_equal(correct, point)
+
+    def test_line_block_plane_collision_parallel(self):
+        with pytest.raises(RuntimeError):
+            ray_direction = np.array([1, 0, 0])
+            line_block_plane_collision(ray_direction)
+
+    def test_line_calc_limit_plane_collision(self):
+        ray_direction = np.array([0, 0, -1])
+        point = line_calc_limit_plane_collision(ray_direction)
+        correct = np.array([0, 0, -50])
+        np.testing.assert_array_almost_equal(correct, point)
+
+    def test_line_calc_limit_plane_collision_parallel(self):
+        with pytest.raises(RuntimeError):
+            ray_direction = np.array([1, 0, 0])
+            line_calc_limit_plane_collision(ray_direction)

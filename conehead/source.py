@@ -12,7 +12,8 @@ class Source:
             import conehead.varian_clinac_6MV
             self.weights = conehead.varian_clinac_6MV.weights
         else:
-            NotImplementedError("The requested source is not yet implemented.")
+            raise NotImplementedError("The requested source is not yet"
+                                      " implemented.")
 
     @property
     def position(self):

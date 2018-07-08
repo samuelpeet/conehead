@@ -143,7 +143,7 @@ def line_calc_limit_plane_collision(ray_direction, epsilon=1e-6):
         Coordinates of line plane intersection
     """
     plane_normal = np.array([0, 0, 1])  # Always towards source
-    plane_point = plane_point = np.array([0, 0, -50])  # Half iso for now
+    plane_point = np.array([0, 0, -50])  # Half iso for now
     ray_point = np.array([0, 0, 0])  # Source position
 
     ndotu = plane_normal.dot(ray_direction)

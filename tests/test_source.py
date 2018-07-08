@@ -1,8 +1,18 @@
+import pytest
 import numpy as np
 from conehead.source import Source
 
 
 class TestSource:
+    def test_SAD(self):
+        SAD = 50
+        source = Source("varian_clinac_6MV", SAD=SAD)
+        assert(source.SAD == 50)
+
+    def test_source_not_implemented_error(self):
+        with pytest.raises(NotImplementedError):
+            Source("varian_clinac_10MV")
+
     def test_gantry_0(self):
         source = Source("varian_clinac_6MV")
         source.gantry(0)
