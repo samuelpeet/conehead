@@ -5,8 +5,28 @@ cimport numpy as cnp
 @cython.boundscheck(False)  # Deactivate bounds checking
 @cython.wraparound(False)   # Deactivate negative indexing.
 @cython.cdivision(True)
-def dda_3d_c(cnp.float64_t[:] source, cnp.float64_t[:] direction, cnp.float64_t[:,:,:] grid, cnp.int32_t[:] first_voxel, cnp.float64_t[:] voxel_size):
+def dda_3d_c(cnp.float64_t[:] direction, cnp.int32_t[:] grid_shape, cnp.int32_t[:] first_voxel, cnp.float64_t[:] voxel_size):
+    """ Calculate the intersection points of a ray with a voxel grid, using a
+    3D DDA algorithm.
 
+    Parameters
+    ----------
+    direction : ndarray
+        direction vector of the ray
+    grid : ndarray
+        Shape of 3D voxel grid
+    first_voxel : ndarray
+        Index of ray source voxel
+    voxel_size : ndarray
+        Size of voxel dimensions
+
+    Returns
+    -------
+    intersection_t_values_mv : ndarray
+        Array of t values corresponding to voxel boundary intersections
+    voxels_traversed_mv : ndarray
+        List of voxel indices intersected by ray
+    """
     cdef cnp.int32_t step[3]
     step[0] = -1 if direction[0] < 0 else 1
     step[1] = -1 if direction[1] < 0 else 1
@@ -27,9 +47,9 @@ def dda_3d_c(cnp.float64_t[:] source, cnp.float64_t[:] direction, cnp.float64_t[
     delta_t[1] = voxel_size[1] / direction[1]
     delta_t[2] = voxel_size[2] / direction[2]
 
-    cdef cnp.int32_t xmax = grid.shape[0]
-    cdef cnp.int32_t ymax = grid.shape[1]
-    cdef cnp.int32_t zmax = grid.shape[2]
+    cdef cnp.int32_t xmax = grid_shape[0]
+    cdef cnp.int32_t ymax = grid_shape[1]
+    cdef cnp.int32_t zmax = grid_shape[2]
 
     # TODO Consider the size of these array better
     voxels_traversed = np.zeros((xmax + ymax + zmax, 3), dtype=np.int32)

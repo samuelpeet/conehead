@@ -8,3 +8,6 @@ install:
 
 script:
 - python3 -m pytest tests/
+
+after-succes:
+- bash <(curl -s https://codecov.io/bash)

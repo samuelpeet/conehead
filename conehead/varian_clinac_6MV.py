@@ -7,6 +7,19 @@ from conehead.nist import mu_W, mu_Al
 
 
 def weights(E):
+    """ Return spectrum weights for a Varian Clinac 6MV linac.
+
+    Parameters
+    ----------
+    E : ndarray
+        Array of energies (units of MV)
+
+    Returns
+    -------
+    ndarray
+        Array of spectrum weights. The array is normalised if it contains more
+        than one value.
+    """
     # Equation 12 of Table 2.
     C_1 = 1.222
     C_2 = 5.147
@@ -18,10 +31,14 @@ def weights(E):
                             np.power(C_2, 2))
 
     # Set negative results to zero
-    psi[psi < 0] = 0
-
-    # Normalise the curve
-    N = np.trapz(psi, x=E)
-    psi /= N
+    if isinstance(psi, np.ndarray):
+        psi[psi < 0] = 0
+        N = np.trapz(psi, x=E)
+        psi /= N
+    else:
+        # Probably just a single float
+        if psi < 0:
+            psi = 0
+        psi = np.array(psi)
 
     return psi

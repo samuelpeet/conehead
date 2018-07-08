@@ -25,6 +25,13 @@ class Block:
         )
 
     def set_square(self, length):
+        """ Set the block to have a square opening with a given side length.
+
+        Parameters
+        ----------
+        length : float
+            Side length of square opening
+        """
         # Set square collimator opening
         x1 = int((self.xnum / 2) - (length / 2) * self.xres)
         x2 = int((self.xnum / 2) + (length / 2) * self.xres)

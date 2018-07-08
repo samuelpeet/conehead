@@ -3,7 +3,18 @@ from scipy.interpolate import interp1d
 
 
 def mu_W(E):
-    """NIST attenuation data for tungsten """
+    """ Return mass attenuation coefficients for tungsten based on NIST data.
+
+    Parameters
+    ----------
+    E : ndarray
+        Array of energies (units of MV)
+
+    Returns
+    -------
+    ndarray
+        Array of interpolated mass attenuation coefficients
+    """
     mu = np.array([[1.00000E-03, 3.683E+03, 3.671E+03],
                    [1.50000E-03, 1.643E+03, 1.632E+03],
                    [1.80920E-03, 1.108E+03, 1.097E+03],
@@ -68,7 +79,18 @@ def mu_W(E):
 
 
 def mu_Al(E):
-    """NIST attenuation data for aluminium """
+    """ Return mass attenuation coefficients for aluminium based on NIST data.
+
+    Parameters
+    ----------
+    E : ndarray
+        Array of energies (units of MV)
+
+    Returns
+    -------
+    ndarray
+        Array of interpolated mass attenuation coefficients
+    """
     mu = np.array([[1.00000E-03, 1.185E+03, 1.183E+03],
                    [1.50000E-03, 4.022E+02, 4.001E+02],
                    [1.55960E-03, 3.621E+02, 3.600E+02],
@@ -112,7 +134,19 @@ def mu_Al(E):
 
 
 def mu_water(E):
-    """NIST attenuation data for liquid water """
+    """ Return mass attenuation coefficients for liquid water based on NIST
+    data.
+
+    Parameters
+    ----------
+    E : ndarray
+        Array of energies (units of MV)
+
+    Returns
+    -------
+    ndarray
+        Array of interpolated mass attenuation coefficients
+    """
     mu = np.array([[1.00000E-03, 4.078E+03, 4.065E+03],
                    [1.50000E-03, 1.376E+03, 1.372E+03],
                    [2.00000E-03, 6.173E+02, 6.152E+02],
