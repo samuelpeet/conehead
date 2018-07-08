@@ -120,7 +120,7 @@ class Conehead:
     def plot(self):
         # Plotting for debug purposes
         print("Calculation complete. Now plotting...")
-        f1 = plt.figure()
+        f1 = plt.figure()  # noqa: F841
         ax = plt.gca()
         im = ax.imshow(
             np.rot90(self.dose_grid_terma[:, 20, :]),
@@ -133,7 +133,7 @@ class Conehead:
         ax.grid(which="minor", color="black", linestyle='-', linewidth=1)
         plt.colorbar(im)
 
-        f2 = plt.figure()
+        f2 = plt.figure()  # noqa: F841
         ax2 = plt.gca()
         ax2.plot(
             -self.dose_grid_positions[2, 20, 20, :] - 100,
