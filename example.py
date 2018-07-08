@@ -4,7 +4,7 @@ from conehead.phantom import Phantom
 from conehead.conehead import Conehead
 
 
-# Create source
+# Choose source
 source = Source("varian_clinac_6MV")
 source.gantry(0)
 source.collimator(0)
@@ -13,7 +13,7 @@ source.collimator(0)
 block = Block(source.rotation)
 block.set_square(10)
 
-# Create simple phantom
+# Simple phantom
 phantom = Phantom()
 
 # Calculation settings
@@ -27,6 +27,6 @@ settings = {
     'eNum': 500,  # Spectrum samples
 }
 
-calculation = Conehead()
-calculation.calculate(source, block, phantom, settings)
-calculation.plot()
+conehead = Conehead()
+conehead.calculate(source, block, phantom, settings)
+conehead.plot()
