@@ -1,6 +1,6 @@
 import numpy as np
 import cython
-import cnumpy as cnp
+cimport numpy as cnp
 
 @cython.boundscheck(False)  # Deactivate bounds checking
 @cython.wraparound(False)   # Deactivate negative indexing.
