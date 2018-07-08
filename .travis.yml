@@ -7,7 +7,7 @@ install:
     - python setup.py build_ext --inplace
 
 script:
-- python3 -m pytest tests/
+- python3 -m pytest --cov=conehead tests/
 
 after_success:
-- codecov
+- bash <(curl -s https://codecov.io/bash)
