@@ -1,11 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from conehead.clinac_6MV_spectrum import psi_E
+from conehead.varian_clinac_6MV import weights
 
-E = np.linspace(0.001, 7, 10000)
-W = psi_E(E)
+E = np.linspace(0.001, 6, 500)
+w = weights(E)
 
-f = plt.figure()
-ax = plt.gca()
-ax.plot(E, W)
-plt.show()
+out = np.dstack((E, w))
+
+print(out)
