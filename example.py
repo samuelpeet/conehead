@@ -1,6 +1,6 @@
 from conehead.source import Source
 from conehead.block import Block
-from conehead.phantom import Phantom
+from conehead.phantom import SimplePhantom
 from conehead.conehead import Conehead
 
 
@@ -14,7 +14,7 @@ block = Block(source.rotation)
 block.set_square(10)
 
 # Simple phantom
-phantom = Phantom()
+phantom = SimplePhantom()
 
 # Calculation settings
 settings = {
