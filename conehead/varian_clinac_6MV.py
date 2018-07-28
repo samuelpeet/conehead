@@ -10,7 +10,7 @@ from scipy.interpolate import interp1d
 def weights(E):
     """ Return spectrum weights for a Varian Clinac 6MV linac.
 
-    From article E S M Ali and D W O Rogers 2012 Phys. Med. Biol. 57 31, 
+    From article E S M Ali and D W O Rogers 2012 Phys. Med. Biol. 57 31,
     corresponding to the 6MV Varian Clinac in table 5.
 
     Parameters
@@ -51,7 +51,7 @@ def weights(E):
 def weights_sheikh_bagheri(E):
     """ Return spectrum weights for a Varian Clinac 6MV linac.
 
-    From article D Sheikh-Bagheri and D W O Rogers 2002 Med. Phys. 29 3, 
+    From article D Sheikh-Bagheri and D W O Rogers 2002 Med. Phys. 29 3,
     corresponding to the 6MV Varian Clinac in table 5.
 
     Parameters
