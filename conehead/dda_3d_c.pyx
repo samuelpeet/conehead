@@ -5,7 +5,7 @@ cimport numpy as cnp
 @cython.boundscheck(False)  # Deactivate bounds checking
 @cython.wraparound(False)   # Deactivate negative indexing.
 @cython.cdivision(True)
-def dda_3d_c(cnp.float64_t[:] direction, cnp.int32_t[:] grid_shape, cnp.int32_t[:] first_voxel, cnp.float64_t[:] voxel_size):
+cdef dda_3d_c(cnp.float64_t* direction, cnp.int32_t* grid_shape, cnp.int32_t* first_voxel, cnp.float64_t* voxel_size):
     """ Calculate the intersection points of a ray with a voxel grid, using a
     3D DDA algorithm.
 

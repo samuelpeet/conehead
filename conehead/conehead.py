@@ -7,7 +7,7 @@ from conehead.geometry import (
     global_to_beam, line_block_plane_collision, line_calc_limit_plane_collision
 )
 from conehead.kernel import PolyenergeticKernel
-from conehead.dda_3d_c import dda_3d_c
+# from conehead.dda_3d_c import dda_3d_c
 import conehead.nist
 
 
@@ -41,7 +41,7 @@ class Conehead:
 
         # Create dose grid (just the same size as the phantom for now)
         self.dose_grid_positions = np.copy(phantom_beam)
-        self.dose_grid_dim = np.array([1, 1, 1], dtype=np.float64)  # cm
+        self.dose_grid_dim = np.array([2, 2, 2], dtype=np.float64)  # cm
 
         # Perform hit testing to find which dose grid voxels are in the beam
         print("Performing hit-testing of dose grid voxels...")
