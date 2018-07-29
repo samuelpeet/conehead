@@ -31,21 +31,40 @@ def dda_3d_c(cnp.float64_t[:] direction, cnp.int32_t[:] grid_shape, cnp.int32_t[
     step[0] = -1 if direction[0] < 0 else 1
     step[1] = -1 if direction[1] < 0 else 1
     step[2] = -1 if direction[2] < 0 else 1
-    
+
+    if direction[0] < 0:
+        direction[0] = -1 * direction[0]
+    if direction[1] < 0:
+        direction[1] = -1 * direction[1]
+    if direction[2] < 0:
+        direction[2] = -1 * direction[2]
+
     cdef cnp.int32_t current_voxel[3]
     current_voxel[0] = first_voxel[0]
     current_voxel[1] = first_voxel[1]
     current_voxel[2] = first_voxel[2]
 
     cdef cnp.float64_t t[3]
-    t[0] = (voxel_size[0] / 2) / direction[0]
-    t[1] = (voxel_size[1] / 2) / direction[1]
-    t[2] = (voxel_size[2] / 2) / direction[2]
-
     cdef cnp.float64_t delta_t[3]
-    delta_t[0] = voxel_size[0] / direction[0]
-    delta_t[1] = voxel_size[1] / direction[1]
-    delta_t[2] = voxel_size[2] / direction[2]
+    cdef cnp.float64_t big_number = 1000000000
+    if direction[0] == 0.0:
+        t[0] = big_number
+        delta_t[0] = big_number
+    else:
+        t[0] = (voxel_size[0] / 2) / direction[0]
+        delta_t[0] = voxel_size[0] / direction[0]
+    if direction[1] == 0.0:
+        t[1] = big_number
+        delta_t[1] = big_number
+    else:
+        t[1] = (voxel_size[1] / 2) / direction[1]
+        delta_t[1] = voxel_size[1] / direction[1]
+    if direction[2] == 0.0:
+        t[2] = big_number
+        delta_t[2] = big_number
+    else:
+        t[2] = (voxel_size[2] / 2) / direction[2]
+        delta_t[2] = voxel_size[2] / direction[2]
 
     cdef cnp.int32_t xmax = grid_shape[0]
     cdef cnp.int32_t ymax = grid_shape[1]
@@ -56,10 +75,10 @@ def dda_3d_c(cnp.float64_t[:] direction, cnp.int32_t[:] grid_shape, cnp.int32_t[
     cdef cnp.int32_t [:, :] voxels_traversed_mv = voxels_traversed
     intersection_t_values = np.zeros(xmax + ymax + zmax + 10, dtype=np.float64)
     cdef cnp.float64_t [:] intersection_t_values_mv = intersection_t_values
-    
-    cdef cnp.int32_t v_count = 0 
+
+    cdef cnp.int32_t v_count = 0
     cdef cnp.int32_t i_count = 0
-    
+
     while (current_voxel[0] >= 0 and current_voxel[0] < xmax and
            current_voxel[1] >= 0 and current_voxel[1] < ymax and
            current_voxel[2] >= 0 and current_voxel[2] < zmax):

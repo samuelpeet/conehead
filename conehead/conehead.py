@@ -6,6 +6,8 @@ from tqdm import tqdm
 from conehead.geometry import (
     global_to_beam, line_block_plane_collision, line_calc_limit_plane_collision
 )
+from conehead.kernel import PolyenergeticKernel
+from conehead.dda_3d_c import dda_3d_c
 import conehead.nist
 
 
@@ -39,6 +41,7 @@ class Conehead:
 
         # Create dose grid (just the same size as the phantom for now)
         self.dose_grid_positions = np.copy(phantom_beam)
+        self.dose_grid_dim = np.array([1, 1, 1], dtype=np.float64)  # cm
 
         # Perform hit testing to find which dose grid voxels are in the beam
         print("Performing hit-testing of dose grid voxels...")
@@ -117,10 +120,81 @@ class Conehead:
                         )
                     )
 
+        # Calculate dose of dose grid voxels
+        print("Convolving kernel...")
+        kernel = PolyenergeticKernel()
+        dose_grid_dose = np.zeros_like(self.dose_grid_terma)
+        phis = [p for p in kernel.cumulative.keys() if p != "radii"]
+        thetas = np.linspace(0, 360, 6, endpoint=False)
+        for x in tqdm(range(xlen)):
+            for y in range(ylen):
+                for z in range(zlen):
+                    T = self.dose_grid_terma[x, y, z]
+                    if T:
+                        for theta in thetas:
+                            for phi in phis:
+
+                                # Raytracing
+                                phi_rad = float(phi) * np.pi / 180
+                                theta_rad = theta * np.pi / 180
+                                direction = np.array([
+                                    np.cos(theta_rad) * np.sin(phi_rad),
+                                    np.sin(theta_rad) * np.sin(phi_rad),
+                                    np.cos(phi_rad)
+                                ], dtype=np.float64)
+                                direction /= np.sum(direction**2)  # Normalise
+                                direction = np.around(  # discretise
+                                    direction,
+                                    decimals=6
+                                )
+                                intersections, voxels = dda_3d_c(
+                                    direction,
+                                    np.array(
+                                        self.dose_grid_terma.shape,
+                                        dtype=np.int32
+                                    ),
+                                    np.array([x, y, z], dtype=np.int32),
+                                    self.dose_grid_dim
+                                )
+
+                                intersections = np.array(
+                                    [int(x) for x in (intersections * 100 - 50)]
+                                )
+                                intersections = np.absolute(intersections)
+
+                                for e, _ in enumerate(intersections):
+                                    v = voxels[e]
+                                    if e == 0:
+                                        k = kernel.cumulative[phi][
+                                            intersections[e]
+                                        ]
+                                    else:
+                                        k = kernel.cumulative[phi][
+                                            intersections[e]
+                                        ] - kernel.cumulative[phi][
+                                            intersections[e - 1]
+                                        ]
+                                    dose_grid_dose[v[0], v[1], v[2]] += T * k
+        self.dose_grid_dose = dose_grid_dose
+
     def plot(self):
         # Plotting for debug purposes
         print("Calculation complete. Now plotting...")
+
         f1 = plt.figure()  # noqa: F841
+        ax = plt.gca()
+        im = ax.imshow(
+            np.rot90(self.dose_grid_fluence[:, 20, :]),
+            extent=[-20.5, 20.5, -40.5, .5],
+            aspect='equal'
+        )
+        # Minor ticks
+        ax.set_xticks(np.arange(-19.5, 20.0, 1.0), minor=True)
+        ax.set_yticks(np.arange(-39.5, 0, 1.0), minor=True)
+        ax.grid(which="minor", color="black", linestyle='-', linewidth=1)
+        plt.colorbar(im)
+
+        f2 = plt.figure()  # noqa: F841
         ax = plt.gca()
         im = ax.imshow(
             np.rot90(self.dose_grid_terma[:, 20, :]),
@@ -133,7 +207,20 @@ class Conehead:
         ax.grid(which="minor", color="black", linestyle='-', linewidth=1)
         plt.colorbar(im)
 
-        f2 = plt.figure()  # noqa: F841
+        f3 = plt.figure()  # noqa: F841
+        ax = plt.gca()
+        im = ax.imshow(
+            np.rot90(self.dose_grid_dose[:, 20, :]),
+            extent=[-20.5, 20.5, -40.5, .5],
+            aspect='equal'
+        )
+        # Minor ticks
+        ax.set_xticks(np.arange(-19.5, 20.0, 1.0), minor=True)
+        ax.set_yticks(np.arange(-39.5, 0, 1.0), minor=True)
+        ax.grid(which="minor", color="black", linestyle='-', linewidth=1)
+        plt.colorbar(im)
+
+        f4 = plt.figure()  # noqa: F841
         ax2 = plt.gca()
         ax2.plot(
             -self.dose_grid_positions[2, 20, 20, :] - 100,
@@ -146,6 +233,12 @@ class Conehead:
             (self.dose_grid_terma[20, 20, :] /
              np.max(self.dose_grid_terma[20, 20, :]) * 100),
             label='TERMA'
+        )
+        ax2.plot(
+            -self.dose_grid_positions[2, 20, 20, :] - 100,
+            (self.dose_grid_dose[20, 20, :] /
+             np.max(self.dose_grid_dose[20, 20, :]) * 100),
+            label='Dose'
         )
         ax2.set_xlim([0, 40.0])
         ax2.set_ylim([0, 100])

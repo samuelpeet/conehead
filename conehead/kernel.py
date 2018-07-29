@@ -83,4 +83,9 @@ class PolyenergeticKernel:
         for key in differential.keys():
             if key != "radii":
                 cumulative[key] = np.cumsum(differential[key])
+                cumulative[key] = np.interp(  # Resample to 0.1 mm
+                    np.linspace(0.05, 60.0, 5996),
+                    cumulative["radii"],
+                    cumulative[key]
+                )
         self.cumulative = cumulative
