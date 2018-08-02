@@ -1,19 +1,22 @@
 cimport numpy as cnp
-from libc.stdlib cimport malloc, realloc, free
+from libc.stdlib cimport malloc, realloc, free, exit
+from libc.stdio cimport sprintf, puts, printf
 
 cdef struct vector:
     cnp.int32_t size
     cnp.int32_t capacity
-    cnp.float64_t* data
+    void** data
 
-cdef vector_init(vector* vector)
+cdef void vector_init(vector* v) nogil
 
-cdef vector_append(vector* vector, cnp.int32_t value)
+cdef void vector_append(vector* v, void* value) nogil
 
-cdef vector_get(vector* vector, cnp.int32_t index)
+cdef void* vector_get(vector* v, cnp.int32_t index) nogil
 
-cdef vector_set(vector* vector, cnp.int32_t index, cnp.float64_t value)
+cdef void vector_set(vector* v, cnp.int32_t index, void* value) nogil
 
-cdef vector_double_capacity_if_full(vector* vector)
+cdef cnp.int32_t vector_size(vector* v) nogil
 
-cdef vector_free(vector* vector)
+cdef void vector_double_capacity_if_full(vector* v) nogil
+
+cdef void vector_free(vector* v) nogil

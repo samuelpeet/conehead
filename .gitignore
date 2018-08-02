@@ -7,6 +7,7 @@ __pycache__/
 
 # C extensions
 *.so
+*.c
 
 # Profiling
 *.cprof
@@ -90,6 +91,7 @@ celerybeat-schedule
 .env
 .venv
 env/
+env-dbg/
 venv/
 ENV/
 env.bak/

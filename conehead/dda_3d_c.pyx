@@ -1,31 +1,34 @@
-import numpy as np
 import cython
 cimport numpy as cnp
+from conehead.vector cimport  (
+    vector, vector_init, vector_append, vector_get, vector_set, vector_free,
+    vector_size
+)
+from libc.stdio cimport sprintf, puts, printf
+from libc.stdlib cimport malloc
 
 @cython.boundscheck(False)  # Deactivate bounds checking
-@cython.wraparound(False)   # Deactivate negative indexing.
+@cython.wraparound(False)  # Deactivate negative indexing
 @cython.cdivision(True)
-cdef dda_3d_c(cnp.float64_t* direction, cnp.int32_t* grid_shape, cnp.int32_t* first_voxel, cnp.float64_t* voxel_size):
+cdef void dda_3d_c(cnp.float64_t* direction, cnp.int32_t* grid_shape,
+                   cnp.int32_t* first_voxel, cnp.float64_t* voxel_size,
+                   result* r) nogil:
     """ Calculate the intersection points of a ray with a voxel grid, using a
-    3D DDA algorithm.
+    3D DDA algorithm. See Amanatides & Woo (1987) Eurographics 87(3).
 
     Parameters
     ----------
-    direction : ndarray
-        direction vector of the ray
-    grid : ndarray
-        Shape of 3D voxel grid
-    first_voxel : ndarray
-        Index of ray source voxel
-    voxel_size : ndarray
-        Size of voxel dimensions
-
-    Returns
-    -------
-    intersection_t_values_mv : ndarray
-        Array of t values corresponding to voxel boundary intersections
-    voxels_traversed_mv : ndarray
-        List of voxel indices intersected by ray
+    direction : cnp.float64_t*
+        Direction vector of the ray, in form [dx, dy, dz]
+    grid_shape : cnp.int32_t*
+        Shape of 3D voxel grid, in form [len(x), len(y), len(z)]
+    first_voxel : cnp.int32_t*
+        Index of ray source voxel, in form [x, y, z]
+    voxel_size : cnp.float64_t*
+        Size of voxel dimensions, in form [dim_x, dim_y, dim_z]
+    r : result*
+        Pointer to a result struct for storing the array of traversed voxels
+        and the array of intersection t-values
     """
     cdef cnp.int32_t step[3]
     step[0] = -1 if direction[0] < 0 else 1
@@ -70,41 +73,65 @@ cdef dda_3d_c(cnp.float64_t* direction, cnp.int32_t* grid_shape, cnp.int32_t* fi
     cdef cnp.int32_t ymax = grid_shape[1]
     cdef cnp.int32_t zmax = grid_shape[2]
 
-    # TODO Consider the size of these array better
-    voxels_traversed = np.zeros((xmax + ymax + zmax, 3), dtype=np.int32)
-    cdef cnp.int32_t [:, :] voxels_traversed_mv = voxels_traversed
-    intersection_t_values = np.zeros(xmax + ymax + zmax + 10, dtype=np.float64)
-    cdef cnp.float64_t [:] intersection_t_values_mv = intersection_t_values
-
-    cdef cnp.int32_t v_count = 0
-    cdef cnp.int32_t i_count = 0
-
     while (current_voxel[0] >= 0 and current_voxel[0] < xmax and
            current_voxel[1] >= 0 and current_voxel[1] < ymax and
            current_voxel[2] >= 0 and current_voxel[2] < zmax):
 
-        voxels_traversed[v_count][0] = current_voxel[0]
-        voxels_traversed[v_count][1] = current_voxel[1]
-        voxels_traversed[v_count][2] = current_voxel[2]
+        vector_append(&r.voxels_traversed, copy_v(current_voxel))
+
         if t[0] < t[1]:
             if t[0] < t[2]:
-                intersection_t_values[i_count] = t[0]
+                vector_append(&r.intersection_t_values, copy_t(&t[0]))
                 t[0] += delta_t[0]
                 current_voxel[0] = current_voxel[0] + step[0]
             else:
-                intersection_t_values[i_count] = t[2]
+                vector_append(&r.intersection_t_values, copy_t(&t[2]))
                 t[2] += delta_t[2]
                 current_voxel[2] = current_voxel[2] + step[2]
         else:
             if t[1] < t[2]:
-                intersection_t_values[i_count] = t[1]
+                vector_append(&r.intersection_t_values, copy_t(&t[1]))
                 t[1] += delta_t[1]
                 current_voxel[1] = current_voxel[1] + step[1]
             else:
-                intersection_t_values[i_count] = t[2]
+                vector_append(&r.intersection_t_values, copy_t(&t[2]))
                 t[2] += delta_t[2]
                 current_voxel[2] = current_voxel[2] + step[2]
-        v_count = v_count + 1
-        i_count = i_count + 1
 
-    return (np.asarray(intersection_t_values_mv[:i_count]), np.asarray(voxels_traversed_mv[:v_count, :]))
+
+cdef cnp.float64_t* copy_t(cnp.float64_t* t) nogil:
+    """ Copy a t-value.
+
+    Parameters
+    ----------
+    t : cnp.float64_t*
+        Pointer to the value to copy
+
+    Returns
+    -------
+    cnp.float64_t*
+        Pointer to the newly created copy
+    """
+    cdef cnp.float64_t* new_t = <cnp.float64_t*>malloc(sizeof(cnp.float64_t))
+    new_t[0] = t[0]
+    return new_t
+
+
+cdef cnp.int32_t* copy_v(cnp.int32_t* v) nogil:
+    """ Copy a voxel index position array.
+
+    Parameters
+    ----------
+    v : cnp.int32_t*
+        Pointer to the voxel to copy
+
+    Returns
+    -------
+    cnp.int32_t*
+        Pointer to the newly created array copy
+    """
+    cdef cnp.int32_t* new_v = <cnp.int32_t*>malloc(3 * sizeof(cnp.int32_t))
+    new_v[0] = v[0]
+    new_v[1] = v[1]
+    new_v[2] = v[2]
+    return new_v

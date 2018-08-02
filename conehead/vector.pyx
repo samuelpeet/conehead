@@ -1,40 +1,54 @@
-cdef vector_init(vector* vector):
+
+cdef void vector_init(vector* v) nogil:
     # Initialize size and capacity
-    vector.size = 0
-    vector.capacity = 10
+    v.size = 0
+    v.capacity = 10
 
-    # Allocate memory for vector.data
-    vector.data = <cnp.float64_t*>malloc(sizeof(cnp.float64_t) * vector.capacity)
+    # Allocate memory for v.data
+    v.data = <void**>malloc(sizeof(void*) * v.capacity)
 
 
-cdef vector_append(vector* vector, cnp.int32_t value):
+cdef void vector_append(vector* v, void* value) nogil:
     # Make sure there's room to expand into
-    vector_double_capacity_if_full(vector)
+    vector_double_capacity_if_full(v)
 
     # Append the value and increment vector.size
-    vector.data[vector.size] = value
-    vector.size += 1
+    v.data[v.size] = value
+    v.size += 1
 
 
-cdef vector_get(vector* vector, cnp.int32_t index):
-#   if (index >= vector.size || index < 0) {
-#     printf("Index %d out of bounds for vector of size %d\n", index, vector.size)
-#     exit(1)
-#   }
-    return vector.data[index]
+cdef void* vector_get(vector* v, cnp.int32_t index) nogil:
+    if index >= v.size or index < 0:
+        printf("Index %d out of bounds for vector of size %d\n", index, v.size)
+        exit(1)
+    return v.data[index]
 
 
-cdef vector_set(vector* vector, cnp.int32_t index, cnp.float64_t value):
+cdef void vector_set(vector* v, cnp.int32_t index, void* value) nogil:
     # Set the value at the desired index
-    vector.data[index] = value
+    v.data[index] = value
+
+cdef cnp.int32_t vector_size(vector* v) nogil:
+    # Return size of vector
+    return v.size
+
+cdef void vector_double_capacity_if_full(vector* v) nogil:
+
+    cdef void** data
+
+    if (v.size >= v.capacity):
+        # double v.capacity and resize the allocated memory accordingly
+        v.capacity *= 2
+        data = <void**>realloc(v.data, sizeof(void *) * v.capacity)
+        if data:
+            v.data = data
+        else:
+            printf("Error reallocating vector memory")
+            exit(1)
 
 
-cdef vector_double_capacity_if_full(vector* vector):
-    if (vector.size >= vector.capacity):
-        # double vector.capacity and resize the allocated memory accordingly
-        vector.capacity *= 2
-        vector.data = <cnp.float64_t*>realloc(vector.data, sizeof(cnp.float64_t) * vector.capacity)
-
-
-cdef vector_free(vector* vector):
-    free(vector.data)
+cdef void vector_free(vector* v) nogil:
+    cdef cnp.int32_t i
+    for i in range(v.size):
+        free(v.data[i])
+    free(v.data)
