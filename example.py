@@ -1,8 +1,6 @@
-from conehead.source import Source
-from conehead.block import Block
-from conehead.phantom import SimplePhantom
-from conehead.conehead import Conehead
-
+from conehead import (
+    Source, Block , SimplePhantom, Conehead
+)
 
 # Choose source
 source = Source("varian_clinac_6MV")
