@@ -9,9 +9,11 @@ scipy = "*"
 matplotlib = "*"
 tqdm = "*"
 cython = "*"
+pydicom = "*"
 
 [dev-packages]
 pytest = "*"
+pylint = "*"
 
 [requires]
 python_version = "3.7"
