@@ -24,7 +24,7 @@ class TestBlock:
            ---       ---
            ----     ----
            -----   -----
-          1------ ------10    
+          1------ ------10
         """
         # Read test plan
         filename = join(dirname(abspath(__file__)), "RP.3DCRT.dcm")
@@ -37,18 +37,18 @@ class TestBlock:
                 raise NotImplementedError(
                     "Only beams with type 'STATIC' are currently implemented."
                 )
-            
+
             # Get boundaries of MLCs
             for collimator in beam.BeamLimitingDeviceSequence:
-                if collimator.RTBeamLimitingDeviceType == 'MLCX':           
+                if collimator.RTBeamLimitingDeviceType == 'MLCX':
                     mlc_boundaries = collimator.LeafPositionBoundaries
-            
+
             # Get jaw and MLC positions
             for collimator in beam.ControlPointSequence[0].BeamLimitingDevicePositionSequence:
                 if collimator.RTBeamLimitingDeviceType in ('X', 'ASYMX'):
                     jaw_x_positions = collimator.LeafJawPositions
                 if collimator.RTBeamLimitingDeviceType in ('Y', 'ASYMY'):
-                    jaw_y_positions = collimator.LeafJawPositions                    
+                    jaw_y_positions = collimator.LeafJawPositions
                 elif collimator.RTBeamLimitingDeviceType == 'MLCX':
                     mlc_ends = collimator.LeafJawPositions
 
@@ -70,7 +70,7 @@ class TestBlock:
 
         # Total width of MLC bank
         mlc_width = int(np.abs(mlc_boundaries[0] - mlc_boundaries[-1]))
-        
+
         # Internal class to manage the creation of leaves
         class Leaf:
             def __init__(self, min_bound, max_bound, end, bank):
@@ -94,10 +94,10 @@ class TestBlock:
                     self.area = np.fliplr(np.flipud(self.area))
                 else:
                     assert False, \
-                    "bank must be \'A\' or \'B\'"                  
+                    "bank must be \'A\' or \'B\'"
 
             def _leaf_transmission(self, width, height):
-                    area = np.ones((width, height)) * 0.98
+                    area = np.ones((width, height)) #* 0.98
                     area[0, :] = 0.20
                     area[1, :] = 0.50
                     area[2, :] = 0.75
@@ -105,14 +105,11 @@ class TestBlock:
                     area[-2, :] = 0.50
                     area[-3, :] = 0.75
                     area[:, -15:] *= np.linspace(1.0, 0.0, 15)
-                    return area
+                    return 1 - area
 
-        # Create leaves 
-        leaves_a = []
-        leaves_b = []
-        for n, _ in enumerate(mlc_boundaries):
-            if n == len(mlc_boundaries) - 1:
-                break
+        # Create leaves
+        leaves_a, leaves_b = [], []
+        for n in range(len(mlc_boundaries) - 1):
             leaves_a.append(Leaf(
                     mlc_boundaries[n],
                     mlc_boundaries[n+1],
@@ -129,18 +126,20 @@ class TestBlock:
             )
 
         # Slice each MLC leaf into the block plane
-        block_values = np.zeros((mlc_width, 4000))
+        block_values = np.ones((mlc_width, 4000))
         for l in leaves_a:
-            block_values[l.r_min:l.r_max, l.c_min:l.c_max] += l.area
+            block_values[l.r_min:l.r_max, l.c_min:l.c_max] = l.area
         for l in leaves_b:
-            block_values[l.r_min:l.r_max, l.c_min:l.c_max] += l.area
+            block_values[l.r_min:l.r_max, l.c_min:l.c_max] = l.area
 
-        # Include jaws in black plane
-        block_values[:, :int(2000+jaw_x_positions[0])] = 1.0
-        block_values[:, int(2000+jaw_x_positions[1]):] = 1.0
-        block_values[:int(mlc_width/2+jaw_y_positions[0]), :] = 1.0
-        block_values[int(mlc_width/2+jaw_y_positions[1]):, :] = 1.0        
+        # # Include jaws in black plane
+        # block_values[:, :int(2000+jaw_x_positions[0])] = 1.0
+        # block_values[:, int(2000+jaw_x_positions[1]):] = 1.0
+        # block_values[:int(mlc_width/2+jaw_y_positions[0]), :] = 1.0
+        # block_values[int(mlc_width/2+jaw_y_positions[1]):, :] = 1.0
 
         import matplotlib.pyplot as plt
         plt.imshow(block_values)
+        plt.title('MLC Transmission')
+        plt.colorbar()
         plt.show()
