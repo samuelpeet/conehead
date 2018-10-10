@@ -249,6 +249,23 @@ class Conehead:
         ax3.set_title('Dose')
         # plt.colorbar(im)
 
+
+        f6 = plt.figure()  # noqa: F841
+        ax6 = plt.gca()
+        im = ax6.imshow(
+            self.dose_grid_dose[:, :, 20],
+            extent=[-20.5, 20.5, -20.5, 20.5],
+            aspect='equal',
+            cmap='viridis'
+        )
+        # Minor ticks
+        ax6.set_xticks(np.arange(-19.5, 20.0, 1.0), minor=True)
+        ax6.set_yticks(np.arange(-39.5, 0, 1.0), minor=True)
+        # ax6.grid(which="minor", color="#666666", linestyle='-', linewidth=1)
+        ax6.set_title('Dose')
+        # plt.colorbar(im)
+
+
         f4 = plt.figure()  # noqa: F841
         ax4 = plt.gca()
         ax4.plot(

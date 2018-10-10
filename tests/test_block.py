@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 import pydicom
 from conehead.block import Block
-
+from scipy.interpolate import RegularGridInterpolator
 
 class TestBlock:
     def test_square_block(self):
@@ -132,11 +132,30 @@ class TestBlock:
         for l in leaves_b:
             block_values[l.r_min:l.r_max, l.c_min:l.c_max] = l.area
 
-        # # Include jaws in black plane
-        # block_values[:, :int(2000+jaw_x_positions[0])] = 1.0
-        # block_values[:, int(2000+jaw_x_positions[1]):] = 1.0
-        # block_values[:int(mlc_width/2+jaw_y_positions[0]), :] = 1.0
-        # block_values[int(mlc_width/2+jaw_y_positions[1]):, :] = 1.0
+        # Include jaws in black plane
+        block_values[:, :int(2000+jaw_x_positions[0])] = 1.0
+        block_values[:, int(2000+jaw_x_positions[1]):] = 1.0
+        block_values[:int(mlc_width/2+jaw_y_positions[0]), :] = 1.0
+        block_values[int(mlc_width/2+jaw_y_positions[1]):, :] = 1.0
+ 
+        xmin, xmax, xnum = (-2000, 2000, 4000)
+        ymin, ymax, ynum = (
+            mlc_boundaries[0],
+            mlc_boundaries[-1],
+            mlc_width
+        )
+        block_locations = np.mgrid[
+            xmin:xmax:xnum*1j,
+            ymin:ymax:ynum*1j
+        ]
+        block_values_interp = RegularGridInterpolator(
+            (np.linspace(xmin, xmax, xnum),
+             np.linspace(ymin, ymax, ynum)),
+            block_values,
+            method='nearest',
+            bounds_error=False,
+            fill_value=0
+        )
 
         import matplotlib.pyplot as plt
         plt.imshow(block_values)

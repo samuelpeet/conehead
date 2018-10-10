@@ -169,13 +169,13 @@ def convolve_c(cnp.float64_t[:,:,:] dose_grid_terma,
                                     # (double intersection)
                                     index1 = (<cnp.int32_t*>vector_get(
                                         &intersection_indices, m
-                                    ))[0]
+                                    ))[0]                                   
                                     k1 = <cnp.float64_t*>vector_get(
                                         current_cone_kernel_data, index1
                                     )
                                     index2 = (<cnp.int32_t*>vector_get(
                                         &intersection_indices, m - 1
-                                    ))[0]
+                                    ))[0]                                  
                                     k2 = <cnp.float64_t*>vector_get(
                                         current_cone_kernel_data, index2
                                     )
