@@ -3,7 +3,7 @@
 # From article:
 # E S M Ali and D W O Rogers 2012 Phys. Med. Biol. 57 31
 import numpy as np
-from conehead.nist import mu_W, mu_Al
+from .nist import mu_W, mu_Al
 from scipy.interpolate import interp1d
 
 
