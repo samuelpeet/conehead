@@ -126,7 +126,7 @@ def line_block_plane_collision(ray_direction, epsilon=1e-6):
     return psi
 
 
-def line_calc_limit_plane_collision(ray_direction, epsilon=1e-6):
+def line_calc_limit_plane_collision(ray_direction, plane_point, epsilon=1e-6):
     """ Calculate the point of intersection of a line and the calculation
     limit plane.
 
@@ -134,6 +134,8 @@ def line_calc_limit_plane_collision(ray_direction, epsilon=1e-6):
     ----------
     ray_direction : ndarray
         Direction vector of ray, normalisation not necessary
+    plane_point : ndarray
+        A point lying on the calculation limit plane 
     epsilon : float
         Cutoff to determine if ray intersects with plane
 
@@ -143,7 +145,7 @@ def line_calc_limit_plane_collision(ray_direction, epsilon=1e-6):
         Coordinates of line plane intersection
     """
     plane_normal = np.array([0, 0, 1])  # Always towards source
-    plane_point = np.array([0, 0, -50])  # Half iso for now
+    plane_point = plane_point
     ray_point = np.array([0, 0, 0])  # Source position
 
     ndotu = plane_normal.dot(ray_direction)

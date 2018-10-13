@@ -9,9 +9,9 @@ class Block:
         if plan:
             self._set_from_plan(plan)
         else:
-            self.xmin, self.xmax, self.xnum = (-20, 20, 400)
+            self.xmin, self.xmax, self.xnum = (-20, 20, 4000)
             self.xres = self.xnum / (self.xmax - self.xmin)
-            self.ymin, self.ymax, self.ynum = (-20, 20, 400)
+            self.ymin, self.ymax, self.ynum = (-20, 20, 4000)
             self.yres = self.ynum / (self.ymax - self.ymin)
             self.block_locations = np.mgrid[
                     self.xmin:self.xmax:self.xnum*1j,

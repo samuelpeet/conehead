@@ -141,14 +141,16 @@ class TestGeometry:
 
     def test_line_calc_limit_plane_collision(self):
         ray_direction = np.array([0, 0, -1])
-        point = line_calc_limit_plane_collision(ray_direction)
-        correct = np.array([0, 0, -50])
+        plane_point = np.array([0, 0, -20])
+        point = line_calc_limit_plane_collision(ray_direction, plane_point)
+        correct = np.array([0, 0, -20])
         np.testing.assert_array_almost_equal(correct, point)
 
     def test_line_calc_limit_plane_collision_parallel(self):
         with pytest.raises(RuntimeError):
             ray_direction = np.array([1, 0, 0])
-            line_calc_limit_plane_collision(ray_direction)
+            plane_point = np.array([0, 0, -20])
+            line_calc_limit_plane_collision(ray_direction, plane_point)
 
     def test_isocentre_plane_position(self):
         position = np.array([10.0, 20.0, 50.0])

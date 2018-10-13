@@ -72,11 +72,15 @@ class Conehead:
         print("Calculating effective depths of dose grid voxels...")
         dose_grid_d_eff = np.zeros_like(dose_grid_blocked)
         xlen, ylen, zlen = dose_grid_d_eff.shape
+        max_z = np.max(self.dose_grid_positions[2, :, :, :])
+        print(max_z)
         for x in tqdm(range(xlen)):
             for y in range(ylen):
                 for z in range(zlen):
                     voxel = self.dose_grid_positions[:, x, y, z]
-                    psi = line_calc_limit_plane_collision(voxel)
+                    psi = line_calc_limit_plane_collision(
+                        voxel, np.array([0, 0, max_z + 5.0])
+                    )
                     dist = np.sqrt(np.sum(np.power(voxel - psi, 2)))
                     num_steps = np.floor(dist / settings['stepSize'])
                     xcoords = np.linspace(voxel[0], psi[0], num_steps)
