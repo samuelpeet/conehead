@@ -1,4 +1,5 @@
 import numpy as np
+from tqdm import tqdm
 cimport cython
 cimport numpy as cnp
 from libc.math cimport sin, cos, ceil, floor
@@ -73,9 +74,9 @@ def convolve_c(cnp.float64_t[:,:,:] dose_grid_terma,
     cdef cnp.int32_t index
 
     # Iterate through all voxels
-    for x in range(xlen):
-        printf("%d/%d...", x, xlen)  # Naive progress indicator
-        fflush(stdout)
+    for x in tqdm(range(xlen)):
+        # printf("%d/%d...", x, xlen)  # Naive progress indicator
+        # fflush(stdout)
         for y in range(ylen):
             for z in range(zlen):
 
