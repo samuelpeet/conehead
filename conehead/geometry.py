@@ -27,7 +27,7 @@ def beam_to_global(beam_coords, source_position, source_rotation):
     ndarray
         The beam coordinates transformed into the global geometry.
     """
-    (rx, ry, rz) = source_rotation
+    (_, ry, rz) = source_rotation
     # (cx, sx) = (np.cos(rx), np.sin(rx))
     (cy, sy) = (np.cos(-ry), np.sin(-ry))
     (cz, sz) = (np.cos(rz), np.sin(rz))
@@ -75,7 +75,7 @@ def global_to_beam(global_coords, source_position, source_rotation):
     ndarray
         The global coordinates transformed into the beam geometry.
     """
-    (rx, ry, rz) = source_rotation
+    (_, ry, rz) = source_rotation
     # (cx, sx) = (np.cos(rx), np.sin(rx))
     (cy, sy) = (np.cos(-ry), np.sin(-ry))
     (cz, sz) = (np.cos(rz), np.sin(rz))
@@ -153,3 +153,24 @@ def line_calc_limit_plane_collision(ray_direction, epsilon=1e-6):
     si = -plane_normal.dot(w) / ndotu
     psi = w + si * ray_direction + plane_point
     return psi
+
+def isocentre_plane_position(position, SAD):
+    """Calculate the position of a voxel projected to the isocentre plane.
+    
+    Parameters
+    ----------
+    position : ndarray
+        Position of voxel in beam coordinates
+    SAD : float
+        Source axis distance
+
+    Returns
+    ------
+    ndarray
+        Voxel position projected to the isocentre plane
+    """
+    x, y, z = position
+    t_iso = SAD / z
+    x_iso = t_iso * x
+    y_iso = t_iso * y
+    return np.array([x_iso, y_iso])

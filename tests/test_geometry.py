@@ -3,7 +3,7 @@ import numpy as np
 from conehead.source import Source
 from conehead.geometry import (
     beam_to_global, global_to_beam, line_block_plane_collision,
-    line_calc_limit_plane_collision
+    line_calc_limit_plane_collision, isocentre_plane_position
 )
 
 
@@ -149,3 +149,9 @@ class TestGeometry:
         with pytest.raises(RuntimeError):
             ray_direction = np.array([1, 0, 0])
             line_calc_limit_plane_collision(ray_direction)
+
+    def test_isocentre_plane_position(self):
+        position = np.array([10.0, 20.0, 50.0])
+        position_iso = isocentre_plane_position(position, 100.0)
+        correct = np.array([20.0, 40.0])
+        np.testing.assert_array_almost_equal(correct, position_iso)

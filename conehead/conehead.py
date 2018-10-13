@@ -4,7 +4,8 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.spatial.distance import euclidean
 from tqdm import tqdm
 from .geometry import (
-    global_to_beam, line_block_plane_collision, line_calc_limit_plane_collision
+    global_to_beam, line_block_plane_collision,
+    line_calc_limit_plane_collision, isocentre_plane_position
 )
 from .kernel import PolyenergeticKernel
 from .convolve_c import convolve_c # pylint: disable=E0611
@@ -43,6 +44,24 @@ class Conehead:
         self.dose_grid_positions = np.copy(phantom_beam)
         self.dose_grid_dim = np.array([1, 1, 1], dtype=np.float64)  # cm
 
+        # # Perform hit testing to find which dose grid voxels are in the beam
+        # print("Performing hit-testing of dose grid voxels...")
+        # _, xlen, ylen, zlen = self.dose_grid_positions.shape
+        # dose_grid_blocked = np.zeros((xlen, ylen, zlen))
+        # dose_grid_OAD = np.zeros((xlen, ylen, zlen))
+        # for x in tqdm(range(xlen)):
+        #     for y in range(ylen):
+        #         for z in range(zlen):
+        #             voxel = self.dose_grid_positions[:, x, y, z]
+        #             psi = line_block_plane_collision(voxel)
+        #             dose_grid_blocked[x, y, z] = (
+        #                 block.block_values_interp([psi[0], psi[1]])
+        #             )
+        #             # Save off-axis distance (at iso plane) for later
+        #             dose_grid_OAD[x, y, z] = (
+        #                 euclidean(np.array([0, 0, source.SAD]), psi)
+        #             )
+
         # Perform hit testing to find which dose grid voxels are in the beam
         print("Performing hit-testing of dose grid voxels...")
         _, xlen, ylen, zlen = self.dose_grid_positions.shape
@@ -51,15 +70,19 @@ class Conehead:
         for x in tqdm(range(xlen)):
             for y in range(ylen):
                 for z in range(zlen):
-                    voxel = self.dose_grid_positions[:, x, y, z]
-                    psi = line_block_plane_collision(voxel)
+                    position = self.dose_grid_positions[:, x, y, z]
+                    position_iso = isocentre_plane_position(
+                        position, source.SAD
+                    )
                     dose_grid_blocked[x, y, z] = (
-                        block.block_values_interp([psi[0], psi[1]])
+                        block.transmission(position_iso)
                     )
                     # Save off-axis distance (at iso plane) for later
                     dose_grid_OAD[x, y, z] = (
-                        euclidean(np.array([0, 0, source.SAD]), psi)
+                        np.sqrt(np.sum(np.power(position_iso, 2)))
                     )
+
+
 
         # Calculate effective depths of dose grid voxels
         print("Calculating effective depths of dose grid voxels...")
