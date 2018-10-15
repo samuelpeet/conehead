@@ -77,6 +77,8 @@ class Conehead:
         for x in tqdm(range(xlen)):
             for y in range(ylen):
                 for z in range(zlen):
+                    if not dose_grid_blocked[x, y, z]:
+                        continue
                     voxel = self.dose_grid_positions[:, x, y, z]
                     psi = line_calc_limit_plane_collision(
                         voxel, np.array([0, 0, max_z + 5.0])
@@ -120,6 +122,8 @@ class Conehead:
         for x in tqdm(range(xlen)):
             for y in range(ylen):
                 for z in range(zlen):
+                    if not dose_grid_blocked[x, y, z]:
+                        continue
                     self.dose_grid_terma[x, y, z] = (
                         np.sum(
                             spectrum_weights *
