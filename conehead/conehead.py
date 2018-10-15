@@ -4,7 +4,7 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.spatial.distance import euclidean
 from tqdm import tqdm
 from .geometry import (
-    global_to_beam, line_block_plane_collision,
+    Transformer, line_block_plane_collision,
     line_calc_limit_plane_collision, isocentre_plane_position
 )
 from .kernel import PolyenergeticKernel
@@ -22,15 +22,14 @@ class Conehead:
 
         # Transform phantom to beam coords
         print("Transforming phantom to beam coords...")
+        transformer = Transformer(source.position, source.rotation)
         phantom_beam = np.zeros_like(phantom.positions)
         _, xlen, ylen, zlen = phantom_beam.shape
         for x in tqdm(range(xlen)):
             for y in range(ylen):
                 for z in range(zlen):
-                    phantom_beam[:, x, y, z] = global_to_beam(
+                    phantom_beam[:, x, y, z] = transformer.global_to_beam(
                         phantom.positions[:, x, y, z],
-                        source.position,
-                        source.rotation
                     )
 
         print("Interpolating phantom densities...")
