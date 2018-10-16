@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 from conehead.source import Source
 from conehead.geometry import (
-    Transformer, line_block_plane_collision,
+    Transform, line_block_plane_collision,
     line_calc_limit_plane_collision, isocentre_plane_position
 )
 
@@ -14,8 +14,8 @@ class TestGeometry:
         source.gantry(0)
         source.collimator(0)
         beam_coords = np.array([.1, .2, .3])
-        transformer = Transformer(source.position, source.rotation)
-        global_coords = transformer.beam_to_global(beam_coords)
+        transform = Transform(source.position, source.rotation)
+        global_coords = transform.beam_to_global(beam_coords)
         correct = np.array([.1, .2, 100.3])
         np.testing.assert_array_almost_equal(correct, global_coords, decimal=5)
 
@@ -25,8 +25,8 @@ class TestGeometry:
         source.gantry(90)
         source.collimator(0)
         beam_coords = np.array([.1, .2, .3])
-        transformer = Transformer(source.position, source.rotation)
-        global_coords = transformer.beam_to_global(beam_coords)
+        transform = Transform(source.position, source.rotation)
+        global_coords = transform.beam_to_global(beam_coords)
         correct = np.array([100.3, .2, -.1])
         np.testing.assert_array_almost_equal(correct, global_coords, decimal=5)
 
@@ -36,8 +36,8 @@ class TestGeometry:
         source.gantry(270)
         source.collimator(0)
         beam_coords = np.array([.1, .2, .3])
-        transformer = Transformer(source.position, source.rotation)
-        global_coords = transformer.beam_to_global(beam_coords)
+        transform = Transform(source.position, source.rotation)
+        global_coords = transform.beam_to_global(beam_coords)
         correct = np.array([-100.3, .2, .1])
         np.testing.assert_array_almost_equal(correct, global_coords, decimal=5)
 
@@ -47,8 +47,8 @@ class TestGeometry:
         source.gantry(0)
         source.collimator(90)
         beam_coords = np.array([.1, .2, .3])
-        transformer = Transformer(source.position, source.rotation)
-        global_coords = transformer.beam_to_global(beam_coords)
+        transform = Transform(source.position, source.rotation)
+        global_coords = transform.beam_to_global(beam_coords)
         correct = np.array([-.2, .1, 100.3])
         np.testing.assert_array_almost_equal(correct, global_coords, decimal=5)
 
@@ -58,8 +58,8 @@ class TestGeometry:
         source.gantry(270)
         source.collimator(270)
         beam_coords = np.array([.1, .2, .3])
-        transformer = Transformer(source.position, source.rotation)
-        global_coords = transformer.beam_to_global(beam_coords)
+        transform = Transform(source.position, source.rotation)
+        global_coords = transform.beam_to_global(beam_coords)
         correct = np.array([-100.3, -.1, .2])
         np.testing.assert_array_almost_equal(correct, global_coords, decimal=5)
 
@@ -69,8 +69,8 @@ class TestGeometry:
         source.gantry(0)
         source.collimator(0)
         global_coords = np.array([.1, .2, .3])
-        transformer = Transformer(source.position, source.rotation)
-        beam_coords = transformer.global_to_beam(global_coords)
+        transform = Transform(source.position, source.rotation)
+        beam_coords = transform.global_to_beam(global_coords)
         correct = np.array([.1, .2, -99.7])
         np.testing.assert_array_almost_equal(correct, beam_coords, decimal=5)
 
@@ -80,8 +80,8 @@ class TestGeometry:
         source.gantry(90)
         source.collimator(0)
         global_coords = np.array([.1, .2, .3])
-        transformer = Transformer(source.position, source.rotation)
-        beam_coords = transformer.global_to_beam(global_coords)
+        transform = Transform(source.position, source.rotation)
+        beam_coords = transform.global_to_beam(global_coords)
         correct = np.array([-.3, .2, -99.9])
         np.testing.assert_array_almost_equal(correct, beam_coords, decimal=5)
 
@@ -91,8 +91,8 @@ class TestGeometry:
         source.gantry(270)
         source.collimator(0)
         global_coords = np.array([.1, .2, .3])
-        transformer = Transformer(source.position, source.rotation)
-        beam_coords = transformer.global_to_beam(global_coords)
+        transform = Transform(source.position, source.rotation)
+        beam_coords = transform.global_to_beam(global_coords)
         correct = np.array([.3, .2, -100.1])
         np.testing.assert_array_almost_equal(correct, beam_coords, decimal=5)
 
@@ -102,8 +102,8 @@ class TestGeometry:
         source.gantry(0)
         source.collimator(90)
         global_coords = np.array([.1, .2, .3])
-        transformer = Transformer(source.position, source.rotation)
-        beam_coords = transformer.global_to_beam(global_coords)
+        transform = Transform(source.position, source.rotation)
+        beam_coords = transform.global_to_beam(global_coords)
         correct = np.array([.2, -.1, -99.7])
         np.testing.assert_array_almost_equal(correct, beam_coords, decimal=5)
 
@@ -113,8 +113,8 @@ class TestGeometry:
         source.gantry(270)
         source.collimator(270)
         global_coords = np.array([.1, .2, .3])
-        transformer = Transformer(source.position, source.rotation)
-        beam_coords = transformer.global_to_beam(global_coords)
+        transform = Transform(source.position, source.rotation)
+        beam_coords = transform.global_to_beam(global_coords)
         correct = np.array([-.2, .3, -100.1])
         np.testing.assert_array_almost_equal(correct, beam_coords, decimal=5)
 

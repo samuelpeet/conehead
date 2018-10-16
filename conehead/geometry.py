@@ -2,21 +2,21 @@ import numpy as np
 from numpy.linalg import inv
 
 
-class Transformer:
+class Transform:
 
     def __init__(self, source_position, source_rotation):
-        """Enable transormation between global and beam coordinates. 
-    
-        Expensive operations such as inversion of rotation matrices are calculated 
+        """Enable transormation between global and beam coordinates.
+
+        Expensive operations such as inversion of rotation matrices are calculated
         only once upon instatiation.
-        
+
         Parameters
         ----------
         source_position : ndarray
             The position of the source in global coordinates
         source_position : ndarray
             The rotation of the source in global coordinates
-        
+
         """
         self.source_position = source_position
         self.source_rotation = source_rotation
@@ -138,7 +138,7 @@ def line_calc_limit_plane_collision(ray_direction, plane_point, epsilon=1e-6):
     ray_direction : ndarray
         Direction vector of ray, normalisation not necessary
     plane_point : ndarray
-        A point lying on the calculation limit plane 
+        A point lying on the calculation limit plane
     epsilon : float
         Cutoff to determine if ray intersects with plane
 
@@ -161,7 +161,7 @@ def line_calc_limit_plane_collision(ray_direction, plane_point, epsilon=1e-6):
 
 def isocentre_plane_position(position, SAD):
     """Calculate the position of a voxel projected to the isocentre plane.
-    
+
     Parameters
     ----------
     position : ndarray
