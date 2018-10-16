@@ -139,6 +139,11 @@ def convolve_c(cnp.float64_t[:,:,:] dose_grid_terma,
                                     intersection * 100.0 - 50.0
                                 )
                                 intersection_index = abs(intersection_index)
+
+                                # Handle if ray larger than kernel data
+                                if intersection_index > 5995:
+                                    continue
+
                                 vector_append(
                                     &intersection_indices,
                                     copy_i(&intersection_index)
@@ -168,15 +173,17 @@ def convolve_c(cnp.float64_t[:,:,:] dose_grid_terma,
                                     # between cumulative kernal data across the
                                     # traverse of the voxel
                                     # (double intersection)
+                                    # printf("got m = %d", m)
                                     index1 = (<cnp.int32_t*>vector_get(
                                         &intersection_indices, m
-                                    ))[0]                                   
+                                    ))[0]
                                     k1 = <cnp.float64_t*>vector_get(
                                         current_cone_kernel_data, index1
                                     )
+                                    # printf("got index1 = %d", index1)
                                     index2 = (<cnp.int32_t*>vector_get(
                                         &intersection_indices, m - 1
-                                    ))[0]                                  
+                                    ))[0]
                                     k2 = <cnp.float64_t*>vector_get(
                                         current_cone_kernel_data, index2
                                     )

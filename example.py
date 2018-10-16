@@ -10,8 +10,8 @@ plan = pydicom.dcmread("RP.3DCRT.dcm", force=True)
 
 # Choose source
 source = Source("varian_clinac_6MV")
-source.gantry(0)
-source.collimator(0)
+source.gantry(15)
+source.collimator(45)
 
 # Set the jaws and MLC
 block = Block(source.rotation, plan=plan)

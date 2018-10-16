@@ -209,7 +209,7 @@ class Conehead:
         f6 = plt.figure()  # pylint: disable=W0612
         ax6 = plt.gca()
         im = ax6.imshow(
-            self.dose_grid_dose[:, :, 20],
+            self.dose_grid_dose[:, :, 10],
             extent=[-20.5, 20.5, -20.5, 20.5],
             aspect='equal',
             cmap='viridis'

@@ -28,14 +28,14 @@ class Block:
             )
 
     def transmission(self, position):
-        """Return the transmission value at the give position
-        
+        """Return the transmission value at the given position
+
         Parameters
         ----------
         position : ndarray
             Position in the isocentre plane at which to return the
             transmission, in cm
-        
+
         Returns
         -------
         float
@@ -43,6 +43,12 @@ class Block:
         """
         position = np.floor(position * 100)  # Convert tenth of a mm
         position = position + 2000
+
+        # Handle position lying outside the defined blocking area
+        for coord in position:
+            if coord < 0 or coord > 3999:
+                return 0.0
+
         transmission = self.block_values[
             int(position[0])-1,
             int(position[1])-1
