@@ -16,7 +16,7 @@ source.collimator(0)
 # Set the jaws and MLC
 # block = Block(source.rotation, plan=plan)
 block = Block()
-block.set_square(30)
+block.set_square(10)
 
 # Use a simple cubic phantom
 phantom = SimplePhantom()
