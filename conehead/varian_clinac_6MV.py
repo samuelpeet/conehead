@@ -7,7 +7,29 @@ from .nist import mu_W, mu_Al
 from scipy.interpolate import interp1d
 
 
-def weights(E):
+def weights_cho(E):
+    """ Return spectrum weights for a generic 6MV linac.
+
+    From article W Cho et al 2012 Journal of Korean Physical Society, 61 12.
+
+    Parameters
+    ----------
+    E : ndarray
+        Array of energies (units of MV)
+
+    Returns
+    -------
+    ndarray
+        Array of spectrum weights. The array is normalised if it contains more
+        than one value.
+    """
+    mu = 0.30
+    sigma = 0.8
+    w = 1 / (np.sqrt(2 * np.pi) * sigma * E)
+    w *= np.exp(-np.power(np.log(E) - mu, 2) / (2 * np.power(sigma, 2)))
+    return w
+
+def weights_ali(E):
     """ Return spectrum weights for a Varian Clinac 6MV linac.
 
     From article E S M Ali and D W O Rogers 2012 Phys. Med. Biol. 57 31,

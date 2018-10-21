@@ -10,7 +10,7 @@ class Source:
 
         if source == "varian_clinac_6MV":
             import conehead.varian_clinac_6MV
-            self.weights = conehead.varian_clinac_6MV.weights
+            self.weights = conehead.varian_clinac_6MV.weights_ali
         else:
             raise NotImplementedError("The requested source is not yet"
                                       " implemented.")
