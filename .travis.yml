@@ -5,10 +5,10 @@ python:
 install:
     - pip install pipenv
     - pipenv install --dev
-    - python3 setup.py build_ext --inplace
+    - pipenv run python3 setup.py build_ext --inplace
 
 script:
-- python3 -m pytest --cov=conehead tests/
+- pipenv run python3 -m pytest --cov=conehead tests/
 
 after_success:
 - bash <(curl -s https://codecov.io/bash)
