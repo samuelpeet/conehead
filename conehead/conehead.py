@@ -48,7 +48,7 @@ class Conehead:
         # self.dose_grid_dim = np.array([1, 1, 1], dtype=np.float64)  # cm
 
         # Create dose grid
-        self.dose_grid_positions = np.mgrid[-20:20:41j, -20:20:41j, -40:0:41j]
+        self.dose_grid_positions = np.mgrid[-20:20:41j, -20:20:41j, -30:10:41j]
         self.dose_grid_dim = np.array([1, 1, 1], dtype=np.float64) # cm
         _, xlen, ylen, zlen = self.dose_grid_positions.shape
         for x in tqdm(range(xlen)):
@@ -69,7 +69,7 @@ class Conehead:
 
                     position = self.dose_grid_positions[:, x, y, z]
 
-                    samples = settings['fluenceResample']
+                    samples = settings['fluenceResampling']
                     offset = self.dose_grid_dim / 3
 
                     block_factor = 0
@@ -124,8 +124,8 @@ class Conehead:
         self.dose_grid_fluence = np.zeros_like(dose_grid_blocked)
         xlen, ylen, zlen = self.dose_grid_fluence.shape
         self.dose_grid_fluence = (
-            settings['sPri'] * -source.SAD /
-            self.dose_grid_positions[2, :, :, :] *
+            settings['sPri'] *
+            np.power(-source.SAD / self.dose_grid_positions[2, :, :, :], 2) *
             dose_grid_blocked
         )
 
@@ -443,7 +443,7 @@ class Conehead:
         # plot_terma()
         plot_dose()
         # plot_10x10_profiles()
-        # plot_10x10_pdd()
-        plot_30x30_profiles()
+        plot_10x10_pdd()
+        # plot_30x30_profiles()
         # plot_cax()
         plt.show()

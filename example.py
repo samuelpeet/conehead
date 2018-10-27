@@ -16,7 +16,7 @@ source.collimator(0)
 # Set the jaws and MLC
 # block = Block(source.rotation, plan=plan)
 block = Block()
-block.set_square(30)
+block.set_square(10)
 
 # Use a simple cubic phantom
 phantom = SimplePhantom()
@@ -24,14 +24,18 @@ phantom = SimplePhantom()
 # Calculation settings
 settings = {
     'stepSize': 0.1,  # Stepsize when raytracing effective depth (cm)
-    'sPri': 1.0,  # Primary source strength (photons/cm^2)
+    'sPri': 1.0,  # Primary source strength
+    'sAnn': 0.1,  # Annular source strength
+    'zAnn': -4.0,  # Height of annular source in beam coordinates
+    'rInner': 0.2,  # Inner radius of annular source
+    'rOuter': 1.4,  # Outer radius of annular source
     'softRatio': 0.0025,  # cm^-1
     'softLimit': 20,  # cm
     'hornRatio': 0.0065,  # % per cm
     'eLow': 0.01,  # MeV
     'eHigh': 7.0,  # MeV
     'eNum': 500,  # Spectrum samples
-    'fluenceResample': 3  # Split voxels for fluence calculatiion
+    'fluenceResampling': 3  # Split voxels for fluence calculatiion
 }
 
 conehead = Conehead()
