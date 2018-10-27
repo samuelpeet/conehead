@@ -16,7 +16,7 @@ source.collimator(0)
 # Set the jaws and MLC
 # block = Block(source.rotation, plan=plan)
 block = Block()
-block.set_square(10)
+block.set_square(30)
 
 # Use a simple cubic phantom
 phantom = SimplePhantom()
@@ -27,10 +27,11 @@ settings = {
     'sPri': 1.0,  # Primary source strength (photons/cm^2)
     'softRatio': 0.0025,  # cm^-1
     'softLimit': 20,  # cm
-    'hornRatio': 0.006,  # % per cm
+    'hornRatio': 0.0065,  # % per cm
     'eLow': 0.01,  # MeV
     'eHigh': 7.0,  # MeV
     'eNum': 500,  # Spectrum samples
+    'fluenceResample': 3  # Split voxels for fluence calculatiion
 }
 
 conehead = Conehead()
