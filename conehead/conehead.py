@@ -48,7 +48,7 @@ class Conehead:
         # self.dose_grid_dim = np.array([1, 1, 1], dtype=np.float64)  # cm
 
         # Create dose grid
-        self.dose_grid_positions = np.mgrid[-20:20:41j, -20:20:41j, -30:10:41j]
+        self.dose_grid_positions = np.mgrid[-20:20:41j, -20:20:41j, -40:0:41j]
         self.dose_grid_dim = np.array([1, 1, 1], dtype=np.float64) # cm
         _, xlen, ylen, zlen = self.dose_grid_positions.shape
         for x in tqdm(range(xlen)):
@@ -82,7 +82,7 @@ class Conehead:
                                     position[2] - offset[2] + offset[2] * iz]),
                                     source.SAD
                                 )
-                                block_factor += block.transmission(position_iso) / samples**2
+                                block_factor += block.transmission(position_iso) / samples**3
                     dose_grid_blocked[x, y, z] = block_factor
 
                     # Save off-axis distance (at iso plane) for later
@@ -128,6 +128,21 @@ class Conehead:
             np.power(-source.SAD / self.dose_grid_positions[2, :, :, :], 2) *
             dose_grid_blocked
         )
+
+
+        r = np.sqrt(np.power(self.dose_grid_positions[0, :, :, :], 2) + np.power(self.dose_grid_positions[1, :, :, :], 2))
+        r_ann = r * settings['zAnn'] / self.dose_grid_positions[2, :, :, :]
+
+        self.dose_grid_fluence += (
+            settings['sAnn'] *
+            self._in_annulus(r_ann, settings['rInner'], settings['rOuter']) *
+            np.power(-source.SAD + settings['zAnn'], 2.0) /
+            np.power(self.dose_grid_positions[2, :, :, :] + settings['zAnn'], 2) *
+            dose_grid_blocked
+        )
+
+
+
 
         # Calculate beam softening factor for dose grid voxels
         print("Calculating beam softening factor...")
@@ -184,6 +199,27 @@ class Conehead:
         )
         self.dose_grid_dose = dose_grid_dose
 
+    def _in_annulus(self, r, R_inner, R_outer):
+        """Check if point with distance r from origin lies inside annular
+        boundaries.
+
+        Parameters
+        ----------
+        r : float
+            Distance of point from origin in annular plane
+        R_inner : float
+            Inner radius of annulus
+        R_outer : float
+            Outer radius of annulus
+
+        Returns
+        -------
+        float
+            1.0 if inside annulus, 1.0 if outside annulus
+        """
+        inside = np.zeros_like(r)
+        inside[(r > R_inner) & (r < R_outer)] = 1.0
+        return inside
 
     def plot(self):
         # Plotting for debug purposes
@@ -220,7 +256,7 @@ class Conehead:
             # ax2.grid(which="minor", color="#666666", linestyle='-', linewidth=1)
             ax2.set_title('TERMA')
             # plt.colorbar(im)
-        
+
         def plot_dose():
             f3 = plt.figure()  # pylint: disable=W0612
             ax3 = plt.gca()
@@ -443,7 +479,7 @@ class Conehead:
         # plot_terma()
         plot_dose()
         # plot_10x10_profiles()
-        plot_10x10_pdd()
-        # plot_30x30_profiles()
+        # plot_10x10_pdd()
+        plot_30x30_profiles()
         # plot_cax()
         plt.show()

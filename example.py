@@ -16,7 +16,7 @@ source.collimator(0)
 # Set the jaws and MLC
 # block = Block(source.rotation, plan=plan)
 block = Block()
-block.set_square(10)
+block.set_square(30)
 
 # Use a simple cubic phantom
 phantom = SimplePhantom()
@@ -24,8 +24,8 @@ phantom = SimplePhantom()
 # Calculation settings
 settings = {
     'stepSize': 0.1,  # Stepsize when raytracing effective depth (cm)
-    'sPri': 1.0,  # Primary source strength
-    'sAnn': 0.1,  # Annular source strength
+    'sPri': 0.90924,  # Primary source strength
+    'sAnn': 2.887e-3,  # Annular source strength
     'zAnn': -4.0,  # Height of annular source in beam coordinates
     'rInner': 0.2,  # Inner radius of annular source
     'rOuter': 1.4,  # Outer radius of annular source
