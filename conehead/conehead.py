@@ -121,6 +121,7 @@ class Conehead:
 
         # Calculate photon fluence at dose grid voxels
         print("Calculating fluence...")
+        # Point source
         self.dose_grid_fluence = np.zeros_like(dose_grid_blocked)
         xlen, ylen, zlen = self.dose_grid_fluence.shape
         self.dose_grid_fluence = (
@@ -128,16 +129,23 @@ class Conehead:
             np.power(-source.SAD / self.dose_grid_positions[2, :, :, :], 2) *
             dose_grid_blocked
         )
-
-
+        # Annular source
         r = np.sqrt(np.power(self.dose_grid_positions[0, :, :, :], 2) + np.power(self.dose_grid_positions[1, :, :, :], 2))
         r_ann = r * settings['zAnn'] / self.dose_grid_positions[2, :, :, :]
-
         self.dose_grid_fluence += (
             settings['sAnn'] *
             self._in_annulus(r_ann, settings['rInner'], settings['rOuter']) *
             np.power(-source.SAD + settings['zAnn'], 2.0) /
             np.power(self.dose_grid_positions[2, :, :, :] + settings['zAnn'], 2) *
+            dose_grid_blocked
+        )
+        # Exponential source
+        r_exp = r * settings['zExp'] / self.dose_grid_positions[2, :, :, :]
+        r_exp[r_exp < 1.0] = 1.0  # Avoid function blowing up near zero
+        self.dose_grid_fluence += (
+            settings['sExp'] / r_exp * np.exp(-settings['kExp'] * r_exp) *
+            np.power(-source.SAD + settings['zExp'], 2.0) /
+            np.power(self.dose_grid_positions[2, :, :, :] + settings['zExp'], 2) *
             dose_grid_blocked
         )
 
@@ -475,7 +483,7 @@ class Conehead:
             # ax5.set_aspect(abs(x1-x0)/abs(y1-y0))
             ax5.legend()
 
-        # plot_fluence()
+        plot_fluence()
         # plot_terma()
         plot_dose()
         # plot_10x10_profiles()

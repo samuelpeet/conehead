@@ -29,6 +29,9 @@ settings = {
     'zAnn': -4.0,  # Height of annular source in beam coordinates
     'rInner': 0.2,  # Inner radius of annular source
     'rOuter': 1.4,  # Outer radius of annular source
+    'zExp': -12.5,  # Height of exponential source in beam coordinates
+    'sExp': 8.289e-3,  # Exponential source strength
+    'kExp': 0.4816,  # Exponential source exponent coefficient
     'softRatio': 0.0025,  # cm^-1
     'softLimit': 20,  # cm
     'hornRatio': 0.0065,  # % per cm
