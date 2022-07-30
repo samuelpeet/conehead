@@ -3,6 +3,7 @@
 # From article:
 # E S M Ali and D W O Rogers 2012 Phys. Med. Biol. 57 31
 import numpy as np
+import numpy.typing as npt
 from .nist import mu_W, mu_Al
 from scipy.interpolate import interp1d
 
@@ -29,7 +30,7 @@ def weights_cho(E):
     w *= np.exp(-np.power(np.log(E) - mu, 2) / (2 * np.power(sigma, 2)))
     return w
 
-def weights_ali(E):
+def weights_ali(E: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
     """ Return spectrum weights for a Varian Clinac 6MV linac.
 
     From article E S M Ali and D W O Rogers 2012 Phys. Med. Biol. 57 31,
@@ -65,7 +66,7 @@ def weights_ali(E):
         # Probably just a single float
         if psi < 0 or np.isnan(psi):
             psi = 0
-        psi = np.array(psi)
+        psi = np.array(psi, dtype=np.float32)
 
     return psi
 
