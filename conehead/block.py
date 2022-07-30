@@ -1,23 +1,29 @@
 import numpy as np
-from scipy.interpolate import RegularGridInterpolator
+import numpy.typing as npt
+from pydicom.dataset import FileDataset
+from scipy.interpolate import RegularGridInterpolator  # type: ignore
 
 
 class Block:
 
-    def __init__(self, rotation=np.array([0, 0, 0]), plan=None):
+    def __init__(self, rotation: npt.NDArray[np.float32] = np.array([0, 0, 0], dtype=np.float32), plan: FileDataset|None = None):
         self.rotation = rotation
         if plan:
             self._set_from_plan(plan)
         else:
-            self.xmin, self.xmax, self.xnum = (-20, 20, 4000)
-            self.xres = self.xnum / (self.xmax - self.xmin)
-            self.ymin, self.ymax, self.ynum = (-20, 20, 4000)
-            self.yres = self.ynum / (self.ymax - self.ymin)
-            self.block_locations = np.mgrid[
+            self.xmin: np.float32 = np.float32(-20)
+            self.xmax: np.float32 = np.float32(20)
+            self.xnum: np.int32 = np.int32(4000)
+            self.xres: np.float32 = self.xnum / (self.xmax - self.xmin)
+            self.ymin: np.float32 = np.float32(-20) 
+            self.ymax: np.float32 = np.float32(20)
+            self.ynum: np.int32 = np.int32(4000)
+            self.yres: np.float32 = self.ynum / (self.ymax - self.ymin)
+            self.block_locations: npt.NDArray[np.float32] = np.mgrid[
                     self.xmin:self.xmax:self.xnum*1j,
                     self.ymin:self.ymax:self.ynum*1j
-                ]
-            self.block_values = np.zeros((self.xnum, self.ynum))
+                ].astype(np.float32)
+            self.block_values: npt.NDArray[np.float32] = np.zeros((self.xnum, self.ynum), dtype=np.float32)
             self.block_values_interp = RegularGridInterpolator(
                 (np.linspace(self.xmin, self.xmax, self.xnum),
                 np.linspace(self.ymin, self.ymax, self.ynum)),
@@ -27,7 +33,7 @@ class Block:
                 fill_value=0
             )
 
-    def transmission(self, position):
+    def transmission(self, position: npt.NDArray[np.float32]) -> np.float32:
         """Return the transmission value at the given position
 
         Parameters
@@ -41,13 +47,13 @@ class Block:
         float
             The block transmission value, from 0.0 to 1.0
         """
-        position = np.floor(position * 100)  # Convert tenth of a mm
-        position = position + 2000
+        position = np.floor(position * np.float32(100))  # Convert tenth of a mm
+        position = position + np.float32(2000)
 
         # Handle position lying outside the defined blocking area
         for coord in position:
             if coord < 0 or coord > 3999:
-                return 0.0
+                return np.float32(0)
 
         transmission = self.block_values[
             int(position[0])-1,
@@ -55,7 +61,7 @@ class Block:
         ]
         return transmission
 
-    def set_square(self, length):
+    def set_square(self, length: np.float32):
         """ Set the block to have a square opening with a given side length.
 
         Parameters
@@ -68,7 +74,7 @@ class Block:
         x2 = int((self.xnum / 2) + (length / 2) * self.xres)
         y1 = int((self.ynum / 2) - (length / 2) * self.yres)
         y2 = int((self.ynum / 2) + (length / 2) * self.yres)
-        self.block_values[x1:x2, y1:y2] = 1.0
+        self.block_values[x1:x2, y1:y2] = np.float32(1)
         self.block_values_interp = RegularGridInterpolator(
             (np.linspace(self.xmin, self.xmax, self.xnum),
              np.linspace(self.ymin, self.ymax, self.ynum)),
@@ -78,7 +84,7 @@ class Block:
             fill_value=0
         )
 
-    def _set_from_plan(self, plan):
+    def _set_from_plan(self, plan: FileDataset):
         # Extract info from plan
         for beam in plan.BeamSequence:
 
@@ -90,28 +96,28 @@ class Block:
             # Get boundaries of MLCs
             for collimator in beam.BeamLimitingDeviceSequence:
                 if collimator.RTBeamLimitingDeviceType == 'MLCX':
-                    mlc_boundaries = collimator.LeafPositionBoundaries
+                    mlc_boundaries: npt.NDArray[np.float32] = np.array(collimator.LeafPositionBoundaries, dtype=np.float32)
 
             # Get jaw and MLC positions
             for collimator in beam.ControlPointSequence[0].BeamLimitingDevicePositionSequence:
                 if collimator.RTBeamLimitingDeviceType in ('X', 'ASYMX'):
-                    jaw_x_positions = collimator.LeafJawPositions
+                    jaw_x_positions: npt.NDArray[np.float32] = np.array(collimator.LeafJawPositions)
                 if collimator.RTBeamLimitingDeviceType in ('Y', 'ASYMY'):
-                    jaw_y_positions = collimator.LeafJawPositions
+                    jaw_y_positions: npt.NDArray[np.float32] = np.array(collimator.LeafJawPositions)
                 elif collimator.RTBeamLimitingDeviceType == 'MLCX':
-                    mlc_ends = collimator.LeafJawPositions
+                    mlc_ends: npt.NDArray[np.float32] = np.array(collimator.LeafJawPositions)
 
         # Convert to numpy arrays
-        mlc_boundaries = np.array(mlc_boundaries).astype(np.float)
-        mlc_ends = np.array(mlc_ends).astype(np.float)
-        jaw_x_positions = np.array(jaw_x_positions).astype(np.float)
-        jaw_y_positions = np.array(jaw_y_positions).astype(np.float)
+        # mlc_boundaries: n = np.array(mlc_boundaries, dtype=np.float32)
+        # mlc_ends = np.array(mlc_ends).astype(np.float32)
+        # jaw_x_positions = np.array(jaw_x_positions).astype(np.float32)
+        # jaw_y_positions = np.array(jaw_y_positions).astype(np.float32)
 
         # Convert to tenths of a millimetre
-        mlc_boundaries = np.floor(mlc_boundaries * 10)
-        mlc_ends = np.floor(mlc_ends * 10)
-        jaw_x_positions = np.floor(jaw_x_positions * 10)
-        jaw_y_positions = np.floor(jaw_y_positions * 10)
+        mlc_boundaries: npt.NDArray[np.float32] = np.floor(mlc_boundaries * 10)
+        mlc_ends: npt.NDArray[np.float32] = np.floor(mlc_ends * 10)
+        jaw_x_positions: npt.NDArray[np.float32] = np.floor(jaw_x_positions * 10)
+        jaw_y_positions: npt.NDArray[np.float32] = np.floor(jaw_y_positions * 10)
 
         # Identify A and B bank ends
         mlc_ends_a = mlc_ends[:int(len(mlc_ends)/2)]
@@ -122,7 +128,7 @@ class Block:
 
         # Internal class to manage the creation of leaves
         class Leaf:
-            def __init__(self, min_bound, max_bound, end, bank):
+            def __init__(self, min_bound: np.float32, max_bound: np.float32, end: np.float32, bank: str):
                 self.min_bound = min_bound
                 self.max_bound = max_bound
                 self.width = int(np.abs(max_bound - min_bound))
@@ -140,13 +146,14 @@ class Block:
                     self.c_min = int(2000 + end)
                     self.c_max = 3999
                     self.area = self._leaf_transmission(self.width, self.c_max - self.c_min)
-                    self.area = np.fliplr(np.flipud(self.area))
+                    self.area = np.fliplr(np.flipud(self.area))  #type: ignore
+                    
                 else:
                     assert False, \
                     "bank must be \'A\' or \'B\'"
 
-            def _leaf_transmission(self, width, height):
-                    area = np.ones((width, height)) #* 0.98
+            def _leaf_transmission(self, width: int, height: int) -> npt.NDArray[np.float32]:
+                    area: npt.NDArray[np.float32] = np.ones((width, height), dtype=np.float32) #* 0.98
                     area[0, :] = 0.20
                     area[1, :] = 0.50
                     area[2, :] = 0.75
@@ -157,7 +164,8 @@ class Block:
                     return 1 - area
 
         # Create leaves
-        leaves_a, leaves_b = [], []
+        leaves_a: list[Leaf] = []
+        leaves_b: list[Leaf] = []
         for n in range(len(mlc_boundaries) - 1):
             leaves_a.append(Leaf(
                     mlc_boundaries[n],
@@ -175,13 +183,13 @@ class Block:
             )
 
         # Slice each MLC leaf into the block plane
-        self.block_values = np.ones((mlc_width, 4000))
+        self.block_values = np.ones((mlc_width, 4000), dtype=np.float32)
         for l in leaves_a:
             self.block_values[l.r_min:l.r_max, l.c_min:l.c_max] = l.area
         for l in leaves_b:
             self.block_values[l.r_min:l.r_max, l.c_min:l.c_max] = l.area
 
-        # Include jaws in black plane
+        # Include jaws in block plane
         self.block_values[:, :int(2000+jaw_x_positions[0])] = 0.0
         self.block_values[:, int(2000+jaw_x_positions[1]):] = 0.0
         self.block_values[:int(mlc_width/2+jaw_y_positions[0]), :] = 0.0
