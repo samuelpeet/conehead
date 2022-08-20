@@ -6,7 +6,7 @@ class Source:
 
     def __init__(self, model: str, sad: np.float32 = np.float32(100)):
         self._sad: np.float32 = sad
-        self._position: npt.NDArray[np.float32] = np.array([0, 0, self._sad], dtype=np.float32)
+        self._position: npt.NDArray[np.float32] = np.array([0, -self._sad, 0], dtype=np.float32)
         self._rotation: npt.NDArray[np.float32] = np.array([0, 0, 0], dtype=np.float32)
 
         if model == "varian_clinac_6MV":
@@ -49,14 +49,14 @@ class Source:
         # Set new source position
         phi: np.float32 = (90 - theta) % 360  # IEC 61217
         x: np.float32 = self.sad * np.cos(phi * np.pi / 180)
-        y: np.float32 = self.position[1]
-        z: np.float32 = self.sad * np.sin(phi * np.pi / 180)
+        y: np.float32 = self.sad * -np.sin(phi * np.pi / 180)
+        z: np.float32 = self.position[2]
         self.position = np.array([x, y, z])
 
         # Set new source rotation
         rx: np.float32 = self.rotation[0]
-        ry: np.float32 = (0 - theta) % 360 * np.pi / 180
-        rz: np.float32 = self.rotation[2]
+        ry: np.float32 = self.rotation[1]
+        rz: np.float32 = (0 - theta) % 360 * np.pi / 180
         self.rotation = np.array([rx, ry, rz], dtype=np.float32)
 
     def collimator(self, theta: np.float32):
