@@ -1,0 +1,351 @@
+================================================================================
+EGSnrc version 4 for x86_64-unknown-linux-gnu          Fri Aug 12 07:47:01 2022
+================================================================================
+configuration...............................................a6fc389
+user code...................................................edknrc
+pegs file...................................................521icru on HEN_HOUSE
+using host..................................................PHY-CCSMN-D01
+input file..................................................3.0MeV
+output file(s)..............................................3.0MeV
+================================================================================
+
+
+ EDKnrc   ON linux (a6fc389) WITH EGSnrcMP.
+                   MAXIMUM NUMBER OF RADIAL AND DEPTH ZONES=  65  48
+ 
+ 
+ *** INPUT CARD I01 ***
+TITLE: Energy deposition kernel for Varian 6MV photons                                
+ 
+
+ FIRST RUN(0),RESTARTED(1),ANALYZE(3),parallel(5):                        0
+ STORE DATA(0) OR NOT(1):                                                 0
+
+==> Energy deposition kernels stored in old format
+
+ *** INPUT CARD MC1 ***
+
+ # OF HISTORIES:                                               20000000
+ 1st initial random number seed:                                      1
+ 2nd initial random number seed:                                     66
+ SCORING OPTION IFULL (0,1,2,3):                                      1
+
+CALCULATION TYPE :                                         ENERGY DEPOSITION KERNEL        
+
+Conical dimension [NCONE] :    48 cones in the problem
+
+ *** WARNING ***. 90 DEGREE CONE INPUT BY USER. JUST MAKING THE POINT.
+
+ 
+ CONE OPENING ANGLES:
+    3.7500    7.5000   11.2500   15.0000   18.7500   22.5000   26.2500   30.0000
+   33.7500   37.5000   41.2500   45.0000   48.7500   52.5000   56.2500   60.0000
+   63.7500   67.5000   71.2500   75.0000   78.7500   82.5000   86.2500   90.0000
+   93.7500   97.5000  101.2500  105.0000  108.7500  112.5000  116.2500  120.0000
+  123.7500  127.5000  131.2500  135.0000  138.7500  142.5000  146.2500  150.0000
+  153.7500  157.5000  161.2500  165.0000  168.7500  172.5000  176.2500  180.0000
+ 
+
+NUMBER OF CONICAL REGIONS NC =    48
+
+REGION WHERE 90 deg IS UPPER CONE :   24
+
+
+Spherical dimension:     24 spheres in the problem ...
+ 
+ RING RADIUS #     1:                                          0.050000 cms
+ RING RADIUS #     2:                                          0.100000 cms
+ RING RADIUS #     3:                                          0.150000 cms
+ RING RADIUS #     4:                                          0.200000 cms
+ RING RADIUS #     5:                                          0.300000 cms
+ RING RADIUS #     6:                                          0.400000 cms
+ RING RADIUS #     7:                                          0.500000 cms
+ RING RADIUS #     8:                                          0.600000 cms
+ RING RADIUS #     9:                                          0.800000 cms
+ RING RADIUS #    10:                                          1.000000 cms
+ RING RADIUS #    11:                                          1.500000 cms
+ RING RADIUS #    12:                                          2.000000 cms
+ RING RADIUS #    13:                                          3.000000 cms
+ RING RADIUS #    14:                                          4.000000 cms
+ RING RADIUS #    15:                                          5.000000 cms
+ RING RADIUS #    16:                                          6.000000 cms
+ RING RADIUS #    17:                                          8.000000 cms
+ RING RADIUS #    18:                                         10.000000 cms
+ RING RADIUS #    19:                                         15.000000 cms
+ RING RADIUS #    20:                                         20.000000 cms
+ RING RADIUS #    21:                                         30.000000 cms
+ RING RADIUS #    22:                                         40.000000 cms
+ RING RADIUS #    23:                                         50.000000 cms
+ RING RADIUS #    24:                                         60.000000 cms
+
+
+
+ number of cavity regions:    0
+ **** no cavity regions defined ****
+
+ MEDIUM #1:                                           H2O521ICRU              
+ 
+
+ *** INPUT CARD M3 ***
+
+ # OF GEOMETRICAL ZONES =                                          1153
+ REGION(  1) = MATERIAL( 0) (VACUUM)
+ REGION(   2) TO REGION(1153) = MATERIAL(  1)
+ 
+ About to read source inputs...
+SOURCE NUMBER =   0
+point source at origin, emission along z-axis
+
+ *** INPUT CARD TC1 ***
+ MONOENERGETIC BEAM:
+
+ KINETIC ENERGY OF THE INCIDENT BEAM:                          3.0000
+ 
+ INCIDENT PARTICLE CHARGE:                                   0
+ 
+
+
+ Bound Compton start region
+  Setting all to            1
+ Rayleigh start region
+  Setting all to            1
+ Relaxations start region
+  Setting all to            1
+ PE sampling start region
+  Setting all to            1
+
+================================================================================
+
+                   Electron/Photon transport parameter
+
+================================================================================
+
+ Photon cross sections                                      si
+ Compton cross sections                                     compton_sigma.da
+ Photon transport cutoff(MeV)                                Set in regions
+ Pair angular sampling                                       SIM
+ Pair cross sections                                         BH 
+ Triplet production                                          OFF
+ Bound Compton scattering                                    ON            
+ Radiative Compton corrections                               OFF           
+ Rayleigh scattering                                         ON            
+ Atomic relaxations                                          EADL          
+ Photoelectron angular sampling                              ON            
+
+ Electron transport cutoff(MeV)                              Set in regions
+ Bremsstrahlung cross sections                              BH  
+ Bremsstrahlung angular sampling                             KM 
+ Spin effects                                                On
+ Electron Impact Ionization                                  Off
+ Maxium electron step in cm (SMAX)                           Set in regions
+ Maximum fractional energy loss/step (ESTEPE)                0.1000
+ Maximum 1st elastic moment/step (XIMAX)                     0.0000
+ Boundary crossing algorithm                                 EXACT     
+ Skin-depth for boundary crossing (MFP)                      3.000    
+ Electron-step algorithm                                     PRESTA-II 
+
+================================================================================
+
+ *** INPUT CARD TC2 ***
+
+ Range rejection is On(1) or Off(0):                                  1
+ ESAVEIN cutoff value(total) for range rejection:              1.0000 MeV
+
+ 
+ *** INPUT CARD TC3 ***
+
+ FORCED PHOTON INTERACTIONS IN EFFECT FROM  1 TO  2 # INTERACTIONS
+
+ *** INPUT CARD TC2C ***
+ NO PATHLENGTH BIASING TO BE DONE
+ 
+
+ *** INPUT for plotting ***
+
+NO PLOTTING REQUESTED
+
+ ********* SUCCESSFUL INPUT ACCOMPLISHED *********
+ 
+ 
+ 
+ 
+ 
+
+
+CALL TO HATCH AT  07:47:01
+ ===> Photonuclear flag:   0
+ RAYLEIGH OPTION REQUESTED FOR MEDIUM NUMBER  1
+
+ Rayleigh data available for medium  1 in PEGS4 data set.
+
+(Re)-initializing photon cross sections with files from the series: si
+
+ Compton cross sections: compton_sigma.da
+ Using Compton cross sections from /home/montecarlo/EGSnrc/HEN_HOUSE/data/compton_sigma.data
+ Working on medium   1 ... 
+  ->  100 atomic ff values computed!
+      preparing data for Rayleigh sampling ... done
+
+OK
+
+Reading screened Rutherford MS data ...............  done 
+
+
+Reading spin data base from /home/montecarlo/EGSnrc/HEN_HOUSE/data/spinms.data
+EGSnrc spin data, version 2.0   
+Data generated on a machine with 1234 endianess
+The endianess of this CPU is 1234
+Ranges:      1.00   100.00  0.30054  1.00000
+
+
+  medium    1 .....................  done
+  
+  Medium            1  sige =    6.3784170227787529        6.1807995067678911       monotone =  F F
+  
+  Initializing tmxs for estepe =   0.10000000000000001       and ximax =   0.50000000000000000     
+  
+Output from subroutine EDGSET:
+==============================
+ Atomic relaxations requested! 
+
+ Reading simplified photo-absorption data ..... Done
+
+ Reading simplified relaxation data ..... Done
+
+ Reading parametrized XCOM photo cross section data ..... Done
+
+ Reading EADL relaxation data ......
+  Z =   1 has  1 shells
+  Z =   8 has  4 shells
+ ...... Done.
+
+
+Bound Compton scattering requested, reading data ......  Done
+
+ Initializing Bound Compton scattering ......
+ Medium   1 has   5 shells: 
+   1    1   1  0.20000 0.116E+03     0.014
+   2   17   1  0.20000 0.155E+02     0.543
+   3   18   2  0.20000 0.793E+02     0.024
+   4   19   3  0.20000 0.479E+02     0.014
+   5   20   4  0.20000 0.479E+02     0.014
+ ...... Done.
+
+ EGSnrc SUCCESSFULLY 'HATCHED' FOR ONE MEDIUM.
+
+
+HATCH COMPLETED AT 07:47:01
+TERMA PER FLUENCE FOR MONOENERGETIC PHOTONS ON MATERIALH2O521ICRU              
+--------------------------------------------------------
+
+T(   3.000)/Eo/Flu= (mu/rho) =  3.9613E-02 cm2/g <= with Rayleigh
+
+T(   3.000)/Eo/Flu= (mu/rho) =  3.9613E-02 cm2/g <= no Rayleigh
+
+
+
+*******************************************************************************
+
+
+                   EXECUTION INFORMATION AND WARNING MESSAGES
+
+
+*******************************************************************************
+
+
+USING EDKnrc(EGSnrc)   ON linux (a6fc389) 
+ 
+
+********* NEW INPUT FILE *********
+
+ Starting shower simulation ...
+
+ Finished    10.0% of cases    764.1 secs elapsed
+ Finished    20.0% of cases   1528.1 secs elapsed
+ Finished    30.0% of cases   2293.1 secs elapsed
+ Finished    40.0% of cases   3058.8 secs elapsed
+ Finished    50.0% of cases   3825.3 secs elapsed
+ Finished    60.0% of cases   4592.6 secs elapsed
+ Finished    70.0% of cases   5360.1 secs elapsed
+ Finished    80.0% of cases   6124.6 secs elapsed
+ Finished    90.0% of cases   6892.1 secs elapsed
+ Finished   100.0% of cases   7657.1 secs elapsed
+
+
+ time elapsed:  7657.2 secs cputime =   7657.1 secs hist/hour =       9403006.0
+
+
+
+       20000000 histories run in  7657.1
+  energy fraction Ftot =   0.947468 +/-   0.000078 [  0.0082 %]
+
+  energy fraction Fpri =   0.575070 +/-   0.000041 [  0.0071 %]
+
+  energy fraction Fsc1 =   0.193146 +/-   0.000055 [  0.0286 %]
+
+  energy fraction Fsc2 =   0.072868 +/-   0.000028 [  0.0380 %]
+
+  energy fraction Fmsc =   0.090120 +/-   0.000018 [  0.0197 %]
+
+  energy fraction Frad =   0.016264 +/-   0.000007 [  0.0418 %]
+
+-----------------------------------
+=> SUM OF ALL COMPONENTS   0.947468
+
+ 100.000% of the photons were classified !!!
+
+   0.005% of the Compton interactions rejected !!!
+
+   0.122% of dep. energy in 1st sphere due to primary sub-threshold events
+
+   0.000% Rayleigh fraction RAY/TOT
+-----------------------------------
+   radius/cm     angle/deg   region #
+------------------------------------------
+    0.05000        3.75000      2
+    0.05000        7.50000      3
+    0.05000       11.25000      4
+    0.05000       15.00000      5
+    0.05000       18.75000      6
+    0.05000       22.50000      7
+    0.05000       26.25000      8
+    0.05000       30.00000      9
+    0.05000       33.75000     10
+    0.05000       37.50000     11
+    0.10000        3.75000     50
+    0.10000        7.50000     51
+    0.10000       11.25000     52
+    0.10000       15.00000     53
+    0.10000       18.75000     54
+    0.10000       22.50000     55
+    0.10000       26.25000     56
+    0.10000       30.00000     57
+    0.10000       33.75000     58
+    0.10000       37.50000     59
+    0.15000        3.75000     98
+    0.15000        7.50000     99
+    0.15000       11.25000    100
+    0.15000       15.00000    101
+    0.15000       18.75000    102
+    0.15000       22.50000    103
+    0.15000       26.25000    104
+    0.15000       30.00000    105
+    0.15000       33.75000    106
+    0.15000       37.50000    107
+
+
+END OF RUN          Fri Aug 12 09:58:09 2022
+
+
+
+
+================================================================================
+Finished simulation
+
+  Elapsed time:                 7868.1 s (  2.186 h)
+  CPU time:                     7657.2 s (  2.127 h)
+  Ratio:                          1.028
+
+
+End of run                                             Fri Aug 12 09:58:09 2022
+================================================================================
