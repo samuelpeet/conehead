@@ -11,7 +11,7 @@ from .geometry import (
     line_block_plane_collision,
     #line_calc_limit_plane_collision, isocentre_plane_position
 )
-from .kernel import PolyenergeticKernel
+from .kernel import KernelMono, KernelPoly
 from .dosegrid import DoseGrid
 # from .convolve_c import convolve_c # pylint: disable=E0611
 from .nist import mu_water
@@ -217,7 +217,7 @@ def cuda_d_eff(dose_grid_size, dose_grid_origin, dose_grid_spacing, dose_grid_de
 
     if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
 
-        max_array_length = 444  # Longest diagonal of 256 x 256 x 256 grid 
+        max_array_length = 444  # Should be equal to or larger than longest diagonal of grid 
         intersection_t_values = cuda.local.array(max_array_length, numba.float32)
         voxels_traversed = cuda.local.array((max_array_length, 3), numba.int32)
 
@@ -361,21 +361,120 @@ def cuda_fluence(dose_grid_fluence, dose_grid_oad, dose_grid_blocked, dose_grid_
 
 
 
+@cuda.jit
+def cuda_terma(dose_grid_terma, dose_grid_blocked, dose_grid_fluence, dose_grid_d_eff, dose_grid_size, energy, energy_weights, mu_w, f_soften, f_horn):
+
+    x, y, z = cuda.grid(3)
+
+    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
+
+        terma = numba.float32(0)
+        for i in range(len(energy)):
+            terma += energy_weights[i] * dose_grid_fluence[x, y, z] * math.exp(
+                -mu_w[i] * f_soften[x, y, z] * dose_grid_d_eff[x, y, z]
+            ) * energy[i] * mu_w[i] * f_horn[x, y, z]
+
+        dose_grid_terma[x, y, z] = terma * dose_grid_blocked[x, y, z]
+
+
+
+
+
+
+
+@cuda.jit
+def cuda_dose(dose_grid_dose, dose_grid_spacing, dose_grid_size, dose_grid_terma, kernel_thetas, kernel_phis, kernel, source_transform):
+
+    x, y, z = cuda.grid(3)
+
+    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
+
+        T = dose_grid_terma[x, y, z]
+        if T:
+
+            for i in range(len(kernel_thetas)):
+                for j in range(len(kernel_phis)):
+
+                    # Save current voxel index for later
+                    current_voxel = cuda.local.array(3, numba.int32)
+                    current_voxel[0] = x
+                    current_voxel[1] = y
+                    current_voxel[2] = z
+
+
+                    # Calculate direction vector
+                    theta_rad = kernel_thetas[i] * math.pi / 180.0
+                    phi_rad = kernel_phis[j] * math.pi / 180.0
+                    c_t = math.cos(theta_rad)
+                    s_t = math.sin(theta_rad)
+                    c_p = math.cos(phi_rad)
+                    s_p = math.sin(phi_rad)
+                    direction = cuda.local.array(3, numba.float32)
+                    direction[0] = c_t * s_p
+                    direction[1] = s_t * s_p
+                    direction[2] = c_p
+                    
+                    # Normalise
+                    N = math.sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
+                    direction[0] /= N  
+                    direction[1] /= N
+                    direction[2] /= N
+
+                    # Raycast to find voxels along cone line
+                    # and boundary intersection values
+                    max_array_length = 444  # Should be equal to or larger than longest diagonal of grid 
+                    intersection_t_values = cuda.local.array(max_array_length, numba.float32)
+                    voxels_traversed = cuda.local.array((max_array_length, 3), numba.int32)
+                    cuda_dda_3d(
+                        current_voxel,
+                        direction,
+                        dose_grid_spacing,
+                        dose_grid_size,
+                        voxels_traversed,
+                        intersection_t_values
+                    )
+
+                    # Calculate which indices in kernel data array will
+                    # correspond to boundary intersection values
+                    for m in range(len(intersection_t_values)):
+                        intersection = intersection_t_values[m]
+
+                        # Convert intersection t value to 0.1 mm and subtract 0.5 mm (first kernel point)
+                        intersection_index = intersection * 100.0 - 50.0
+
+
+
+    
+            dose_grid_dose[x, y, z] = 100.0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            
+
 class Conehead:
 
     def calculate(self, source, block, phantom, settings):
-
-        # # Transform phantom to beam coords
-        # print("Transforming phantom to beam coords...")
-        # transform = Transform(source.position, source.rotation)
-        # phantom_beam = np.zeros_like(phantom.positions)
-        # _, xlen, ylen, zlen = phantom_beam.shape
-        # for x in tqdm(range(xlen)):
-        #     for y in range(ylen):
-        #         for z in range(zlen):
-        #             phantom_beam[:, x, y, z] = transform.global_to_beam(
-        #                 phantom.positions[:, x, y, z],
-        #             )
 
         print("Interpolating phantom densities...")
         phantom_densities_interp = RegularGridInterpolator(
@@ -388,23 +487,8 @@ class Conehead:
             fill_value=0
         )
 
-        # # Create dose grid (just the same size as the phantom for now)
-        # self.dose_grid_positions = np.copy(phantom_beam)
-        # self.dose_grid_dim = np.array([1, 1, 1], dtype=np.float64)  # cm
-
         # Create dose grid (just the same size as the phantom for now)
         self.dose_grid = DoseGrid(phantom.size, phantom.origin, phantom.spacing)
-        # self.dose_grid_positions = phantom.
-        # self.dose_grid_dim = np.array([1, 1, 1], dtype=np.float64) # cm
-        # _, xlen, ylen, zlen = self.dose_grid_positions.shape
-        # for x in tqdm(range(xlen)):
-        #     for y in range(ylen):
-        #         for z in range(zlen):
-        #             self.dose_grid_positions[:, x, y, z] = transform.global_to_beam(
-        #                 self.dose_grid_positions[:, x, y, z],
-        #             )
-
-
 
 
         # Perform hit testing to find which dose grid voxels are in the beam
@@ -427,13 +511,6 @@ class Conehead:
             settings['fluenceResampling']
         )
         dose_grid_blocked = dose_grid_blocked_device.copy_to_host()
-
-        plt.imshow(dose_grid_blocked[:, 30, :])
-        plt.title("Blocked")
-        plt.show()
-
-
-
 
 
         print("Interpolating densities at points in dose grid...")
@@ -465,13 +542,6 @@ class Conehead:
         )
         dose_grid_d_eff = dose_grid_d_eff_device.copy_to_host()
 
-        plt.imshow(dose_grid_d_eff[30, :, :])
-        plt.title("d_eff")
-        plt.show()
-
-
-
-
 
         print("Calculating off-axis distances")
         dose_grid_oad = np.zeros_like(dose_grid_densities, dtype=np.float32)
@@ -492,11 +562,6 @@ class Conehead:
             cuda.to_device(source.v_y)            
         ) 
         dose_grid_oad = dose_grid_oad_device.copy_to_host()   
-
-        plt.imshow(dose_grid_oad[30, :, :])
-        plt.title("OAD")
-        plt.show()
-
 
 
         print("Calculating photon fluence...")
@@ -527,62 +592,132 @@ class Conehead:
         )
         dose_grid_fluence = dose_grid_fluence_device.copy_to_host()
 
-        plt.imshow(dose_grid_fluence[30, :, :])
-        plt.title("Fluence")
-        plt.show()
-
-
-
-
 
         # Calculate beam softening factor for dose grid voxels
         print("Calculating beam softening factor...")
-        f_soften = np.ones_like(dose_grid_oad)
+        f_soften = np.ones_like(dose_grid_oad, dtype=np.float32)
         f_soften[dose_grid_oad < settings['softLimit']] = 1 / (
             1 - settings['softRatio'] *
             dose_grid_oad[dose_grid_oad < settings['softLimit']]
         )
-
-        plt.imshow(f_soften[30, :, :])
-        plt.title("Beam softening")
-        plt.show()
-
+        f_soften_device = cuda.to_device(f_soften)
 
 
         # Calculate beam softening factor for dose grid voxels
         print("Calculating horn factor...")
-        f_horn = np.ones_like(dose_grid_oad)
+        f_horn = np.ones_like(dose_grid_oad, dtype=np.float32)
         f_horn += dose_grid_oad * settings['hornRatio']
+        f_horn_device = cuda.to_device(f_horn)
 
-        plt.imshow(f_horn[30, :, :])
-        plt.title("Horn factor")
+
+        # Calculate TERMA of dose grid voxels
+        print("Calculating TERMA...")
+        energy = np.array([np.float32(x) for x in settings['energy_weights'].keys()], dtype=np.float32)
+        energy_weights = np.array([np.float32(x) for x in settings['energy_weights'].values()], dtype=np.float32)
+        mu_w = mu_water(energy)
+        dose_grid_terma = np.zeros_like(dose_grid_densities, dtype=np.float32)
+        dose_grid_terma_device = cuda.to_device(dose_grid_terma)
+        threadsperblock = (8, 8, 8)
+        blockspergrid_x = math.ceil(dose_grid_fluence.shape[0] / threadsperblock[0])
+        blockspergrid_y = math.ceil(dose_grid_fluence.shape[1] / threadsperblock[1])
+        blockspergrid_z = math.ceil(dose_grid_fluence.shape[2] / threadsperblock[2])
+        blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
+        cuda_terma[blockspergrid, threadsperblock](
+            dose_grid_terma_device,
+            dose_grid_blocked_device,
+            dose_grid_fluence_device,
+            dose_grid_d_eff_device,
+            cuda.to_device(self.dose_grid.size),
+            cuda.to_device(energy),
+            cuda.to_device(energy_weights),
+            cuda.to_device(mu_w),
+            f_soften_device,
+            f_horn_device
+        )
+        dose_grid_terma = dose_grid_terma_device.copy_to_host()
+
+
+        print("Building Polyenergetic Kernel...")
+        kernels = {
+            "0.5": KernelMono("kernels/0.5MeV/0.5MeV.egslst"),
+            "1.0": KernelMono("kernels/1.5MeV/1.5MeV.egslst"),
+            "1.5": KernelMono("kernels/1.5MeV/1.5MeV.egslst"),
+            "2.0": KernelMono("kernels/2.0MeV/2.0MeV.egslst"),
+            "2.5": KernelMono("kernels/2.5MeV/2.5MeV.egslst"),
+            "3.0": KernelMono("kernels/3.0MeV/3.0MeV.egslst"),
+            "3.5": KernelMono("kernels/3.5MeV/3.5MeV.egslst"),
+            "4.0": KernelMono("kernels/4.0MeV/4.0MeV.egslst"),
+            "4.5": KernelMono("kernels/4.5MeV/4.5MeV.egslst"),
+            "5.0": KernelMono("kernels/5.0MeV/5.0MeV.egslst"),
+            "5.5": KernelMono("kernels/5.5MeV/5.5MeV.egslst"),
+            "6.0": KernelMono("kernels/6.0MeV/6.0MeV.egslst"),
+        }
+        kernel_diff = np.zeros_like(kernels["0.5"].kernel_diff)
+        for e in settings['energy_weights'].keys():
+            kernel_diff += kernels[e].kernel_diff * settings['energy_weights'][e]
+        kernel_diff = kernel_diff / kernel_diff.sum()  # normalise
+        kernel_poly = KernelPoly(kernels["0.5"].angles, kernels["0.5"].radii, kernel_diff)
+        kernel_thetas = np.linspace(0, 360 - (360 / 12), 12, dtype=np.float32)  # Baking in number of thetas to 12 for now
+        kernel_phis = kernel_poly.angles
+
+
+
+
+
+
+
+        print("Calculating dose...")
+        dose_grid_dose = np.zeros_like(dose_grid_densities, dtype=np.float32)
+        dose_grid_dose_device = cuda.to_device(dose_grid_dose)
+        threadsperblock = (8, 8, 8)
+        blockspergrid_x = math.ceil(dose_grid_dose.shape[0] / threadsperblock[0])
+        blockspergrid_y = math.ceil(dose_grid_dose.shape[1] / threadsperblock[1])
+        blockspergrid_z = math.ceil(dose_grid_dose.shape[2] / threadsperblock[2])
+        blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
+        cuda_dose[blockspergrid, threadsperblock](
+            dose_grid_dose_device,
+            cuda.to_device(self.dose_grid.spacing),
+            cuda.to_device(self.dose_grid.size),
+            dose_grid_terma_device,
+            cuda.to_device(kernel_thetas),
+            cuda.to_device(kernel_phis),
+            cuda.to_device(kernel_poly.kernel_cum),
+            cuda.to_device(source.transform)
+        )
+        dose_grid_dose = dose_grid_dose_device.copy_to_host()
+
+
+
+
+
+
+
+
+
+
+
+        fig, ax = plt.subplots(3, 3, figsize=[12, 12])
+        ax[0, 0].imshow(dose_grid_blocked[:, 30, :])
+        ax[0, 0].set_title("Hit test")
+        ax[0, 1].imshow(dose_grid_d_eff[150, :, :])
+        ax[0, 1].set_title("d_eff")
+        ax[0, 2].imshow(dose_grid_oad[150, :, :])
+        ax[0, 2].set_title("OAD")
+        ax[1, 0].imshow(dose_grid_fluence[150, :, :])
+        ax[1, 0].set_title("Fluence")
+        ax[1, 1].imshow(f_soften[150, :, :])
+        ax[1, 1].set_title("Beam softening")
+        ax[1, 2].imshow(f_horn[150, :, :])
+        ax[1, 2].set_title("Horn factor")
+        ax[2, 0].imshow(dose_grid_terma[150, :, :])
+        ax[2, 0].set_title("TERMA")
+        ax[2, 1].imshow(dose_grid_dose[150, :, :])
+        ax[2, 1].set_title("Dose")        
+        plt.tight_layout()
         plt.show()
 
 
 
-
-        # # Calculate TERMA of dose grid voxels
-        # print("Calculating TERMA...")
-        # E = np.linspace(settings['eLow'], settings['eHigh'], settings['eNum'])
-        # spectrum_weights = source.weights(E)
-        # mu_w = mu_water(E)
-        # self.dose_grid_terma = np.zeros_like(dose_grid_blocked)
-        # xlen, ylen, zlen = self.dose_grid_terma.shape
-        # for x in tqdm(range(xlen)):
-        #     for y in range(ylen):
-        #         for z in range(zlen):
-        #             if not dose_grid_blocked[x, y, z]:
-        #                 continue
-        #             self.dose_grid_terma[x, y, z] = (
-        #                 np.sum(
-        #                     spectrum_weights *
-        #                     self.dose_grid_fluence[x, y, z] *
-        #                     np.exp(
-        #                         -mu_w * f_soften[x, y, z] *
-        #                         dose_grid_d_eff[x, y, z]
-        #                     ) * E * mu_w
-        #                 ) * f_horn[x, y, z]
-        #             )
 
         # # Calculate dose of dose grid voxels
         # print("Convolving kernel...")

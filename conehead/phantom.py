@@ -9,8 +9,8 @@ class SimplePhantom:
 
         # self.positions: npt.NDArray[np.float32] = np.mgrid[-20:20:41j, -40:0:41j, -20:20:41j].astype(np.float32)
         # _, xlen, ylen, zlen = self.positions.shape
-        self.size: list[int] = [60, 60, 60]
+        self.size: list[int] = [300, 300, 300]
         self.origin: npt.NDArray[np.float32] = np.array([-30, 0, -30], dtype=np.float32)
-        self.spacing: npt.NDArray[np.float32] = np.array([1, 1, 1], dtype=np.float32)
+        self.spacing: npt.NDArray[np.float32] = np.array([0.2, 0.2, 0.2], dtype=np.float32)
         self.densities: npt.NDArray[np.float32] = np.ones(self.size, dtype=np.float32)  # Water
         # phantom_densities[15:26, 15:26, 15:26] = np.float32(4)  # Higher density feature
