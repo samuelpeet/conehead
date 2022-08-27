@@ -40,7 +40,21 @@ settings = {
     'eLow': 0.01,  # MeV
     'eHigh': 7.0,  # MeV
     'eNum': 500,  # Spectrum samples
-    'fluenceResampling': 3  # Split voxels for fluence calculation
+    'fluenceResampling': 3,  # Split voxels for fluence calculation
+    'energy_weights': {  # Varian Clinac iX 6MV
+        "0.5": 0.08196,
+        "1.0": 0.12385,
+        "1.5": 0.10605,
+        "2.0": 0.08307,
+        "2.5": 0.05881,
+        "3.0": 0.03911,
+        "3.5": 0.02131,
+        "4.0": 0.02426,
+        "4.5": 0.0,
+        "5.0": 0.00881,
+        "5.5": 0.0,
+        "6.0": 0.00498,
+    }    
 }
 
 conehead = Conehead()
