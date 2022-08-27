@@ -1,44 +1,389 @@
 import numpy as np
+import os; os.environ["NUMBA_ENABLE_CUDASIM"] = "0"; os.environ["NUMBA_CUDA_DEBUGINFO"] = "0";
+import numba
+from numba import cuda
 import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
 from scipy.spatial.distance import euclidean
+import math
 from tqdm import tqdm
 from .geometry import (
-    Transform, line_block_plane_collision,
-    line_calc_limit_plane_collision, isocentre_plane_position
+    line_block_plane_collision,
+    #line_calc_limit_plane_collision, isocentre_plane_position
 )
 from .kernel import PolyenergeticKernel
-from .convolve_c import convolve_c # pylint: disable=E0611
+from .dosegrid import DoseGrid
+# from .convolve_c import convolve_c # pylint: disable=E0611
 from .nist import mu_water
 
-# Ignore annoying numpy FutureWarning, should be fixed by numpy 1.20
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
+
+
+@cuda.jit(device=True)
+def cuda_dot(a, b) -> numba.float32:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+@cuda.jit(device=True)
+def cuda_line_block_plane_collision(pos_plane, ray_start, ray_direction, plane_normal, epsilon):
+
+    plane_point = cuda.local.array(3, numba.float32)
+    plane_point[0] = 0
+    plane_point[1] = 0
+    plane_point[2] = 0
+
+    ndotu = cuda_dot(plane_normal, ray_direction)
+    if abs(ndotu) < epsilon:
+        raise RuntimeError("no intersection or line is within plane")
+
+    w = cuda.local.array(3, numba.float32)
+    w[0] = ray_start[0] - plane_point[0]
+    w[1] = ray_start[1] - plane_point[1]
+    w[2] = ray_start[2] - plane_point[2]
+
+    si = -cuda_dot(plane_normal, w) / ndotu
+    pos_plane[0] = w[0] + si * ray_direction[0] + plane_point[0]
+    pos_plane[1] = w[1] + si * ray_direction[1] + plane_point[1]
+    pos_plane[2] = w[2] + si * ray_direction[2] + plane_point[2]
+
+    return pos_plane
+
+
+@cuda.jit(device=True)
+def cuda_block_transmission(position, block_values) -> numba.float32:
+
+        position[0] = math.floor(position[0] * numba.float32(100))  # Convert tenth of a mm
+        position[1] = math.floor(position[1] * numba.float32(100))
+        
+        position[0] = position[0] + numba.float32(2000)
+        position[1] = position[1] + numba.float32(2000)
+
+        # Handle position lying outside the defined blocking area
+        for coord in position:
+            if coord < 0 or coord > 3999:
+                return numba.float32(0)
+
+        transmission = block_values[
+            int(position[0])-1,
+            int(position[1])-1
+        ]
+        return transmission
+
+
+@cuda.jit
+def cuda_hit_test(dose_grid_blocked, dose_grid_size, dose_grid_origin, dose_grid_spacing, source_position, source_v_y, source_transform, block_values, samples):
+
+    x, y, z = cuda.grid(3)
+    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
+        
+        position = cuda.local.array(3, numba.float32)
+        position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * x
+        position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * y
+        position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * z
+
+        offset = cuda.local.array(3, numba.float32)
+        offset[0] = dose_grid_spacing[0] / samples
+        offset[1] = dose_grid_spacing[1] / samples
+        offset[2] = dose_grid_spacing[2] / samples
+
+        block_factor: numba.float32 = 0
+        for ix in range(samples):
+            for iy in range(samples):
+                for iz in range(samples):
+                    
+                    # Position of sample
+                    pos_sample = cuda.local.array(3, numba.float32)
+                    pos_sample[0] = position[0] - dose_grid_spacing[0]/2 + offset[0]/2 + offset[0] * ix
+                    pos_sample[1] = position[1] - dose_grid_spacing[1]/2 + offset[1]/2 + offset[1] * iy
+                    pos_sample[2] = position[2] - dose_grid_spacing[2]/2 + offset[2]/2 + offset[2] * iz
+
+                    # Determine position on blocking plane in global coords                      
+                    ray_direction = cuda.local.array(3, numba.float32)
+                    ray_direction[0] = source_position[0] - pos_sample[0]
+                    ray_direction[1] = source_position[1] - pos_sample[1]
+                    ray_direction[2] = source_position[2] - pos_sample[2]
+                    
+                    pos_plane = cuda.local.array(3, numba.float32)
+                    pos_plane = cuda_line_block_plane_collision(pos_plane, source_position, ray_direction, source_v_y, 1e-6)
+
+                    # Convert to source coords
+                    pos_block = cuda.local.array(3, numba.float32)
+                    pos_block[0] = cuda_dot(source_transform[0, :], pos_plane)
+                    pos_block[1] = cuda_dot(source_transform[1, :], pos_plane)
+                    pos_block[2] = cuda_dot(source_transform[2, :], pos_plane)
+                   
+                    # Reduce to 2D
+                    pos_block_2d = cuda.local.array(2, numba.float32)
+                    pos_block_2d[0] = pos_block[0]
+                    pos_block_2d[1] = pos_block[2]
+
+                    block_factor = block_factor + cuda_block_transmission(pos_block_2d, block_values) / samples**3
+        
+        dose_grid_blocked[x, y, z] = block_factor
+
+
+@cuda.jit(device=True)
+def cuda_dda_3d(current_voxel, direction, dose_grid_spacing, dose_grid_size, voxels_traversed, intersection_t_values):
+
+    step = cuda.local.array(3, numba.int32)
+    step[0] = -1 if direction[0] < 0 else 1
+    step[1] = -1 if direction[1] < 0 else 1
+    step[2] = -1 if direction[2] < 0 else 1
+
+    if direction[0] < 0:
+        direction[0] = -1 * direction[0]
+    if direction[1] < 0:
+        direction[1] = -1 * direction[1]
+    if direction[2] < 0:
+        direction[2] = -1 * direction[2]
+
+    t = cuda.local.array(3, numba.float32)
+    t[0] = 0.0
+    t[1] = 0.0
+    t[2] = 0.0
+    
+    delta_t = cuda.local.array(3, numba.float32)
+    delta_t[0] = 0.0
+    delta_t[1] = 0.0
+    delta_t[2] = 0.0
+    big_number = 1000000000.0
+    
+    if direction[0] == 0.0:
+        t[0] = big_number
+        delta_t[0] = big_number
+    else:
+        t[0] = (dose_grid_spacing[0] / 2) / direction[0]
+        delta_t[0] = dose_grid_spacing[0] / direction[0]
+    if direction[1] == 0.0:
+        t[1] = big_number
+        delta_t[1] = big_number
+    else:
+        t[1] = (dose_grid_spacing[1] / 2) / direction[1]
+        delta_t[1] = dose_grid_spacing[1] / direction[1]
+    if direction[2] == 0.0:
+        t[2] = big_number
+        delta_t[2] = big_number
+    else:
+        t[2] = (dose_grid_spacing[2] / 2) / direction[2]
+        delta_t[2] = dose_grid_spacing[2] / direction[2]
+
+    xmax = dose_grid_size[0]
+    ymax = dose_grid_size[1]
+    zmax = dose_grid_size[2]
+
+    intersection_t_values_count = 0
+    voxels_traversed_count = 0
+
+    while (current_voxel[0] >= 0 and current_voxel[0] < xmax and
+           current_voxel[1] >= 0 and current_voxel[1] < ymax and
+           current_voxel[2] >= 0 and current_voxel[2] < zmax):
+
+        voxels_traversed[voxels_traversed_count, 0] = current_voxel[0]
+        voxels_traversed[voxels_traversed_count, 1] = current_voxel[1]
+        voxels_traversed[voxels_traversed_count, 2] = current_voxel[2]
+        voxels_traversed_count += 1
+        if t[0] < t[1]:
+            if t[0] < t[2]:
+                intersection_t_values[intersection_t_values_count] = t[0]
+                intersection_t_values_count += 1              
+                t[0] += delta_t[0]
+                current_voxel[0] += step[0]
+            else:
+                intersection_t_values[intersection_t_values_count] = t[2]
+                intersection_t_values_count += 1
+                t[2] += delta_t[2]
+                current_voxel[2] += step[2]
+        else:
+            if t[1] < t[2]:
+                intersection_t_values[intersection_t_values_count] = t[1]
+                intersection_t_values_count += 1
+                t[1] += delta_t[1]
+                current_voxel[1] += step[1]
+            else:
+                intersection_t_values[intersection_t_values_count] = t[2]
+                intersection_t_values_count += 1
+                t[2] += delta_t[2]
+                current_voxel[2] += step[2]
+
+    return (voxels_traversed_count, intersection_t_values_count)
+
+
+@cuda.jit
+def cuda_d_eff(dose_grid_size, dose_grid_origin, dose_grid_spacing, dose_grid_densities, source_position, d_eff):
+
+    x, y, z = cuda.grid(3)
+    current_voxel = cuda.local.array(3, numba.int32)
+    current_voxel[0] = x
+    current_voxel[1] = y
+    current_voxel[2] = z
+
+    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
+
+        max_array_length = 444  # Longest diagonal of 256 x 256 x 256 grid 
+        intersection_t_values = cuda.local.array(max_array_length, numba.float32)
+        voxels_traversed = cuda.local.array((max_array_length, 3), numba.int32)
+
+        # Get voxel position
+        position = cuda.local.array(3, numba.float32)
+        position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * x
+        position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * y
+        position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * z
+
+        # Determine direction to source                      
+        ray_direction = cuda.local.array(3, numba.float32)
+        ray_direction[0] = source_position[0] - position[0]
+        ray_direction[1] = source_position[1] - position[1]
+        ray_direction[2] = source_position[2] - position[2]
+        mag = math.sqrt(ray_direction[0]*ray_direction[0] + ray_direction[1]*ray_direction[1] + ray_direction[2]*ray_direction[2])
+        ray_direction[0] /= mag
+        ray_direction[1] /= mag
+        ray_direction[2] /= mag
+
+
+        voxels_traversed_count, intersection_t_values_count = cuda_dda_3d(
+            current_voxel,
+            ray_direction,
+            dose_grid_spacing,
+            dose_grid_size,
+            voxels_traversed,
+            intersection_t_values
+        )
+        d_eff[x, y, z] = 0
+        for v in range(voxels_traversed_count):
+            if v == 0:
+                d_eff[x, y, z] += dose_grid_densities[voxels_traversed[v, 0], voxels_traversed[v, 1], voxels_traversed[v, 2]] * (intersection_t_values[v])    
+            else:
+                d_eff[x, y, z] += dose_grid_densities[voxels_traversed[v, 0], voxels_traversed[v, 1], voxels_traversed[v, 2]] * (intersection_t_values[v] - intersection_t_values[v - 1])
+
+
+
+
+@cuda.jit(device=True)
+def cuda_dist_point_to_line(A, B, C):
+    # A is the point, B and C are two points on the line
+    # magnitude(cross(A - B, C - B)) / magnitude(C - B). 
+
+    a_b = cuda.local.array(3, numba.float32)
+    a_b[0] = A[0] - B[0]    
+    a_b[1] = A[1] - B[1]
+    a_b[2] = A[2] - B[2]
+    a_b_mag = math.sqrt(a_b[0] * a_b[0] + a_b[1] * a_b[1] + a_b[2] * a_b[2])
+
+    c_b = cuda.local.array(3, numba.float32)
+    c_b[0] = C[0] - B[0]    
+    c_b[1] = C[1] - B[1]
+    c_b[2] = C[2] - B[2]
+    c_b_mag = math.sqrt(c_b[0] * c_b[0] + c_b[1] * c_b[1] + c_b[2] * c_b[2])
+
+    # Angle between vectors
+    theta = math.acos(cuda_dot(a_b, c_b) / (a_b_mag * c_b_mag))
+    
+    # Cross product
+    a_b_cross_c_b = a_b_mag * c_b_mag * math.sin(theta)
+
+    return a_b_cross_c_b / c_b_mag
+     
+
+
+@cuda.jit
+def cuda_oad(dose_grid_oad, dose_grid_size, dose_grid_origin, dose_grid_spacing, source_position, source_sad, source_transform, source_v_y):
+
+    x, y, z = cuda.grid(3)
+
+    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:   
+
+        # Get voxel position
+        position = cuda.local.array(3, numba.float32)
+        position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * x
+        position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * y
+        position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * z
+
+        # Determine distance/direction to source                      
+        distance = cuda.local.array(3, numba.float32)
+        distance[0] = source_position[0] - position[0]
+        distance[1] = source_position[1] - position[1]
+        distance[2] = source_position[2] - position[2]
+
+        # Project position to iso plane 
+        pos_plane = cuda.local.array(3, numba.float32)
+        pos_plane = cuda_line_block_plane_collision(pos_plane, source_position, distance, source_v_y, 1e-6)
+        
+        # Convert to source coords
+        pos_source = cuda.local.array(3, numba.float32)
+        pos_source[0] = cuda_dot(source_transform[0, :], pos_plane)
+        pos_source[1] = cuda_dot(source_transform[1, :], pos_plane)
+        pos_source[2] = cuda_dot(source_transform[2, :], pos_plane)
+        dose_grid_oad[x, y, z] = math.sqrt(pos_source[0] * pos_source[0] + pos_source[2] * pos_source[2])
+
+
+
+
+
+@cuda.jit
+def cuda_fluence(dose_grid_fluence, dose_grid_oad, dose_grid_blocked, dose_grid_size, dose_grid_origin, dose_grid_spacing, source_position, source_sad, sPri, zAnn, sAnn, rInner, rOuter, zExp, sExp, kExp):
+
+    x, y, z = cuda.grid(3)
+
+    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
+
+        # Get voxel position
+        position = cuda.local.array(3, numba.float32)
+        position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * x
+        position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * y
+        position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * z
+
+        # Determine distance/direction to source                      
+        distance = cuda.local.array(3, numba.float32)
+        distance[0] = source_position[0] - position[0]
+        distance[1] = source_position[1] - position[1]
+        distance[2] = source_position[2] - position[2]
+        mag = math.sqrt(
+            distance[0] * distance[0] + 
+            distance[1] * distance[1] + 
+            distance[2] * distance[2]
+        )
+        oad = dose_grid_oad[x, y, z]
+
+        # Point source
+        fluence_point = sPri * math.pow(source_sad / mag, 2)
+
+        # Annular source
+        r_ann = oad * zAnn / source_sad
+        if r_ann >= rInner and r_ann <= rOuter:
+            fluence_ann = sAnn * math.pow(source_sad - zAnn, 2) / math.pow(mag - zAnn, 2)
+        else:
+            fluence_ann = 0.0
+        
+        # Exponential source
+        oad = 2.0 if oad < 2.0 else oad  # Avoid function blowing up near zero
+        r_exp = oad * zExp / source_sad
+        fluence_exp = sExp / r_exp * math.exp(-kExp * r_exp) * math.pow(source_sad - zExp, 2) / math.pow(mag - zExp, 2)
+
+        dose_grid_fluence[x, y, z] = (fluence_point + fluence_ann + fluence_exp) * dose_grid_blocked[x, y, z]
+
 
 
 class Conehead:
 
     def calculate(self, source, block, phantom, settings):
 
-        # Transform phantom to beam coords
-        print("Transforming phantom to beam coords...")
-        transform = Transform(source.position, source.rotation)
-        phantom_beam = np.zeros_like(phantom.positions)
-        _, xlen, ylen, zlen = phantom_beam.shape
-        for x in tqdm(range(xlen)):
-            for y in range(ylen):
-                for z in range(zlen):
-                    phantom_beam[:, x, y, z] = transform.global_to_beam(
-                        phantom.positions[:, x, y, z],
-                    )
+        # # Transform phantom to beam coords
+        # print("Transforming phantom to beam coords...")
+        # transform = Transform(source.position, source.rotation)
+        # phantom_beam = np.zeros_like(phantom.positions)
+        # _, xlen, ylen, zlen = phantom_beam.shape
+        # for x in tqdm(range(xlen)):
+        #     for y in range(ylen):
+        #         for z in range(zlen):
+        #             phantom_beam[:, x, y, z] = transform.global_to_beam(
+        #                 phantom.positions[:, x, y, z],
+        #             )
 
         print("Interpolating phantom densities...")
         phantom_densities_interp = RegularGridInterpolator(
-            (phantom_beam[0, :, 0, 0],
-             phantom_beam[1, 0, :, 0],
-             phantom_beam[2, 0, 0, :]),
+            (np.linspace(phantom.origin[0], phantom.origin[0] + phantom.size[0] * phantom.spacing[0], phantom.size[0]),
+             np.linspace(phantom.origin[1], phantom.origin[1] + phantom.size[1] * phantom.spacing[1], phantom.size[1]),
+             np.linspace(phantom.origin[2], phantom.origin[2] + phantom.size[2] * phantom.spacing[2], phantom.size[2])),
             phantom.densities,
-            method='nearest',
+            method='linear',
             bounds_error=False,
             fill_value=0
         )
@@ -47,165 +392,216 @@ class Conehead:
         # self.dose_grid_positions = np.copy(phantom_beam)
         # self.dose_grid_dim = np.array([1, 1, 1], dtype=np.float64)  # cm
 
-        # Create dose grid
-        self.dose_grid_positions = np.mgrid[-20:20:41j, -20:20:41j, -40:0:41j]
-        self.dose_grid_dim = np.array([1, 1, 1], dtype=np.float64) # cm
-        _, xlen, ylen, zlen = self.dose_grid_positions.shape
-        for x in tqdm(range(xlen)):
-            for y in range(ylen):
-                for z in range(zlen):
-                    self.dose_grid_positions[:, x, y, z] = transform.global_to_beam(
-                        self.dose_grid_positions[:, x, y, z],
-                    )
+        # Create dose grid (just the same size as the phantom for now)
+        self.dose_grid = DoseGrid(phantom.size, phantom.origin, phantom.spacing)
+        # self.dose_grid_positions = phantom.
+        # self.dose_grid_dim = np.array([1, 1, 1], dtype=np.float64) # cm
+        # _, xlen, ylen, zlen = self.dose_grid_positions.shape
+        # for x in tqdm(range(xlen)):
+        #     for y in range(ylen):
+        #         for z in range(zlen):
+        #             self.dose_grid_positions[:, x, y, z] = transform.global_to_beam(
+        #                 self.dose_grid_positions[:, x, y, z],
+        #             )
+
+
+
 
         # Perform hit testing to find which dose grid voxels are in the beam
         print("Performing hit-testing of dose grid voxels...")
-        _, xlen, ylen, zlen = self.dose_grid_positions.shape
-        dose_grid_blocked = np.zeros((xlen, ylen, zlen))
-        dose_grid_OAD = np.zeros((xlen, ylen, zlen))
-        for x in tqdm(range(xlen)):
-            for y in range(ylen):
-                for z in range(zlen):
-
-                    position = self.dose_grid_positions[:, x, y, z]
-
-                    samples = settings['fluenceResampling']
-                    offset = self.dose_grid_dim / 3
-
-                    block_factor = 0
-                    for ix in range(samples):
-                        for iy in range(samples):
-                            for iz in range(samples):
-                                position_iso = isocentre_plane_position(np.array([
-                                    position[0] - offset[0] + offset[0] * ix,
-                                    position[1] - offset[1] + offset[1] * iy,
-                                    position[2] - offset[2] + offset[2] * iz]),
-                                    source.SAD
-                                )
-                                block_factor += block.transmission(position_iso) / samples**3
-                    dose_grid_blocked[x, y, z] = block_factor
-
-                    # Save off-axis distance (at iso plane) for later
-                    position_iso = isocentre_plane_position(
-                        position, source.SAD
-                    )
-                    dose_grid_OAD[x, y, z] = (
-                        np.sqrt(np.sum(np.power(position_iso, 2)))
-                    )
-
-        # Calculate effective depths of dose grid voxels
-        print("Calculating effective depths of dose grid voxels...")
-        dose_grid_d_eff = np.zeros_like(dose_grid_blocked)
-        xlen, ylen, zlen = dose_grid_d_eff.shape
-        max_z = np.max(self.dose_grid_positions[2, :, :, :])
-        print(max_z)
-        for x in tqdm(range(xlen)):
-            for y in range(ylen):
-                for z in range(zlen):
-                    if not dose_grid_blocked[x, y, z]:
-                        continue
-                    voxel = self.dose_grid_positions[:, x, y, z]
-                    psi = line_calc_limit_plane_collision(
-                        voxel, np.array([0, 0, max_z + 5.0])
-                    )
-                    dist = np.sqrt(np.sum(np.power(voxel - psi, 2)))
-                    num_steps = np.floor(dist / settings['stepSize'])
-                    xcoords = np.linspace(voxel[0], psi[0], num_steps)
-                    ycoords = np.linspace(voxel[1], psi[1], num_steps)
-                    zcoords = np.linspace(voxel[2], psi[2], num_steps)
-                    dose_grid_d_eff[x, y, z] = np.sum(
-                        phantom_densities_interp(
-                            np.dstack((xcoords, ycoords, zcoords))
-                        ) * settings['stepSize']
-                    )
-
-        # Calculate photon fluence at dose grid voxels
-        print("Calculating fluence...")
-        # Point source
-        self.dose_grid_fluence = np.zeros_like(dose_grid_blocked)
-        xlen, ylen, zlen = self.dose_grid_fluence.shape
-        self.dose_grid_fluence = (
-            settings['sPri'] *
-            np.power(-source.SAD / self.dose_grid_positions[2, :, :, :], 2) *
-            dose_grid_blocked
+        dose_grid_blocked_device = cuda.to_device(np.zeros(self.dose_grid.size))
+        threadsperblock = (8, 8, 8)
+        blockspergrid_x = math.ceil(dose_grid_blocked_device.shape[0] / threadsperblock[0])
+        blockspergrid_y = math.ceil(dose_grid_blocked_device.shape[1] / threadsperblock[1])
+        blockspergrid_z = math.ceil(dose_grid_blocked_device.shape[2] / threadsperblock[2])
+        blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
+        cuda_hit_test[blockspergrid, threadsperblock](
+            dose_grid_blocked_device,
+            cuda.to_device(self.dose_grid.size),
+            cuda.to_device(self.dose_grid.origin),
+            cuda.to_device(self.dose_grid.spacing),
+            cuda.to_device(source.position),
+            cuda.to_device(source.v_y),
+            cuda.to_device(source.transform),
+            cuda.to_device(block.block_values),
+            settings['fluenceResampling']
         )
-        # Annular source
-        r = np.sqrt(np.power(self.dose_grid_positions[0, :, :, :], 2) + np.power(self.dose_grid_positions[1, :, :, :], 2))
-        r_ann = r * settings['zAnn'] / self.dose_grid_positions[2, :, :, :]
-        self.dose_grid_fluence += (
-            settings['sAnn'] *
-            self._in_annulus(r_ann, settings['rInner'], settings['rOuter']) *
-            np.power(-source.SAD + settings['zAnn'], 2.0) /
-            np.power(self.dose_grid_positions[2, :, :, :] + settings['zAnn'], 2) *
-            dose_grid_blocked
+        dose_grid_blocked = dose_grid_blocked_device.copy_to_host()
+
+        plt.imshow(dose_grid_blocked[:, 30, :])
+        plt.title("Blocked")
+        plt.show()
+
+
+
+
+
+        print("Interpolating densities at points in dose grid...")
+        xx, yy, zz = np.meshgrid(
+            np.linspace(self.dose_grid.origin[0], self.dose_grid.origin[0] + self.dose_grid.size[0] * self.dose_grid.spacing[0], self.dose_grid.size[0]),
+            np.linspace(self.dose_grid.origin[1], self.dose_grid.origin[1] + self.dose_grid.size[1] * self.dose_grid.spacing[1], self.dose_grid.size[1]),
+            np.linspace(self.dose_grid.origin[2], self.dose_grid.origin[2] + self.dose_grid.size[2] * self.dose_grid.spacing[2], self.dose_grid.size[2])
         )
-        # Exponential source
-        r_exp = r * settings['zExp'] / self.dose_grid_positions[2, :, :, :]
-        r_exp[r_exp < 1.0] = 1.0  # Avoid function blowing up near zero
-        self.dose_grid_fluence += (
-            settings['sExp'] / r_exp * np.exp(-settings['kExp'] * r_exp) *
-            np.power(-source.SAD + settings['zExp'], 2.0) /
-            np.power(self.dose_grid_positions[2, :, :, :] + settings['zExp'], 2) *
-            dose_grid_blocked
+        dose_grid_densities = np.float32(phantom_densities_interp((xx, yy, zz)))
+        dose_grid_densities_device = cuda.to_device(dose_grid_densities)
+
+
+
+        print("Calculating effective depths...")
+        dose_grid_densities_device = cuda.to_device(dose_grid_densities)
+        dose_grid_d_eff_device = cuda.to_device(np.zeros_like(dose_grid_densities, dtype=np.float32))
+        threadsperblock = (8, 8, 8)
+        blockspergrid_x = math.ceil(dose_grid_densities.shape[0] / threadsperblock[0])
+        blockspergrid_y = math.ceil(dose_grid_densities.shape[1] / threadsperblock[1])
+        blockspergrid_z = math.ceil(dose_grid_densities.shape[2] / threadsperblock[2])
+        blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
+        cuda_d_eff[blockspergrid, threadsperblock](
+            cuda.to_device(self.dose_grid.size),
+            cuda.to_device(self.dose_grid.origin),
+            cuda.to_device(self.dose_grid.spacing),
+            dose_grid_densities_device,
+            cuda.to_device(source.position),
+            dose_grid_d_eff_device
         )
+        dose_grid_d_eff = dose_grid_d_eff_device.copy_to_host()
+
+        plt.imshow(dose_grid_d_eff[30, :, :])
+        plt.title("d_eff")
+        plt.show()
+
+
+
+
+
+        print("Calculating off-axis distances")
+        dose_grid_oad = np.zeros_like(dose_grid_densities, dtype=np.float32)
+        dose_grid_oad_device = cuda.to_device(dose_grid_oad)
+        threadsperblock = (8, 8, 8)
+        blockspergrid_x = math.ceil(dose_grid_oad.shape[0] / threadsperblock[0])
+        blockspergrid_y = math.ceil(dose_grid_oad.shape[1] / threadsperblock[1])
+        blockspergrid_z = math.ceil(dose_grid_oad.shape[2] / threadsperblock[2])
+        blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
+        cuda_oad[blockspergrid, threadsperblock](
+            dose_grid_oad_device,
+            cuda.to_device(self.dose_grid.size),
+            cuda.to_device(self.dose_grid.origin),
+            cuda.to_device(self.dose_grid.spacing),
+            cuda.to_device(source.position),
+            source.sad,
+            cuda.to_device(source.transform),
+            cuda.to_device(source.v_y)            
+        ) 
+        dose_grid_oad = dose_grid_oad_device.copy_to_host()   
+
+        plt.imshow(dose_grid_oad[30, :, :])
+        plt.title("OAD")
+        plt.show()
+
+
+
+        print("Calculating photon fluence...")
+        dose_grid_fluence = np.zeros_like(dose_grid_densities, dtype=np.float32)
+        dose_grid_fluence_device = cuda.to_device(dose_grid_fluence)
+        threadsperblock = (8, 8, 8)
+        blockspergrid_x = math.ceil(dose_grid_fluence.shape[0] / threadsperblock[0])
+        blockspergrid_y = math.ceil(dose_grid_fluence.shape[1] / threadsperblock[1])
+        blockspergrid_z = math.ceil(dose_grid_fluence.shape[2] / threadsperblock[2])
+        blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
+        cuda_fluence[blockspergrid, threadsperblock](
+            dose_grid_fluence_device,
+            dose_grid_oad_device,
+            dose_grid_blocked_device,
+            cuda.to_device(self.dose_grid.size),
+            cuda.to_device(self.dose_grid.origin),
+            cuda.to_device(self.dose_grid.spacing),
+            cuda.to_device(source.position),
+            source.sad,
+            settings['sPri'],
+            settings['zAnn'],
+            settings['sAnn'],
+            settings['rInner'],
+            settings['rOuter'],
+            settings['zExp'],
+            settings['sExp'],
+            settings['kExp']
+        )
+        dose_grid_fluence = dose_grid_fluence_device.copy_to_host()
+
+        plt.imshow(dose_grid_fluence[30, :, :])
+        plt.title("Fluence")
+        plt.show()
+
 
 
 
 
         # Calculate beam softening factor for dose grid voxels
         print("Calculating beam softening factor...")
-        f_soften = np.ones_like(dose_grid_OAD)
-        f_soften[dose_grid_OAD < settings['softLimit']] = 1 / (
+        f_soften = np.ones_like(dose_grid_oad)
+        f_soften[dose_grid_oad < settings['softLimit']] = 1 / (
             1 - settings['softRatio'] *
-            dose_grid_OAD[dose_grid_OAD < settings['softLimit']]
+            dose_grid_oad[dose_grid_oad < settings['softLimit']]
         )
+
+        plt.imshow(f_soften[30, :, :])
+        plt.title("Beam softening")
+        plt.show()
+
+
 
         # Calculate beam softening factor for dose grid voxels
         print("Calculating horn factor...")
-        f_horn = np.ones_like(dose_grid_OAD)
-        f_horn += dose_grid_OAD * settings['hornRatio']
+        f_horn = np.ones_like(dose_grid_oad)
+        f_horn += dose_grid_oad * settings['hornRatio']
 
-        # Calculate TERMA of dose grid voxels
-        print("Calculating TERMA...")
-        E = np.linspace(settings['eLow'], settings['eHigh'], settings['eNum'])
-        spectrum_weights = source.weights(E)
-        mu_w = mu_water(E)
-        self.dose_grid_terma = np.zeros_like(dose_grid_blocked)
-        xlen, ylen, zlen = self.dose_grid_terma.shape
-        for x in tqdm(range(xlen)):
-            for y in range(ylen):
-                for z in range(zlen):
-                    if not dose_grid_blocked[x, y, z]:
-                        continue
-                    self.dose_grid_terma[x, y, z] = (
-                        np.sum(
-                            spectrum_weights *
-                            self.dose_grid_fluence[x, y, z] *
-                            np.exp(
-                                -mu_w * f_soften[x, y, z] *
-                                dose_grid_d_eff[x, y, z]
-                            ) * E * mu_w
-                        ) * f_horn[x, y, z]
-                    )
+        plt.imshow(f_horn[30, :, :])
+        plt.title("Horn factor")
+        plt.show()
 
-        # Calculate dose of dose grid voxels
-        print("Convolving kernel...")
-        kernel = PolyenergeticKernel()
-        dose_grid_dose = np.zeros_like(self.dose_grid_terma, dtype=np.float64)
-        phis = np.array(
-            sorted([p for p in kernel.cumulative.keys() if p != "radii"]),
-            dtype=np.float64
-        )
-        thetas = np.linspace(0, 360, 12, endpoint=False, dtype=np.float64)
-        convolve_c(
-            self.dose_grid_terma,
-            dose_grid_dose,
-            self.dose_grid_dim,
-            thetas,
-            phis,
-            kernel
-        )
-        self.dose_grid_dose = dose_grid_dose
+
+
+
+        # # Calculate TERMA of dose grid voxels
+        # print("Calculating TERMA...")
+        # E = np.linspace(settings['eLow'], settings['eHigh'], settings['eNum'])
+        # spectrum_weights = source.weights(E)
+        # mu_w = mu_water(E)
+        # self.dose_grid_terma = np.zeros_like(dose_grid_blocked)
+        # xlen, ylen, zlen = self.dose_grid_terma.shape
+        # for x in tqdm(range(xlen)):
+        #     for y in range(ylen):
+        #         for z in range(zlen):
+        #             if not dose_grid_blocked[x, y, z]:
+        #                 continue
+        #             self.dose_grid_terma[x, y, z] = (
+        #                 np.sum(
+        #                     spectrum_weights *
+        #                     self.dose_grid_fluence[x, y, z] *
+        #                     np.exp(
+        #                         -mu_w * f_soften[x, y, z] *
+        #                         dose_grid_d_eff[x, y, z]
+        #                     ) * E * mu_w
+        #                 ) * f_horn[x, y, z]
+        #             )
+
+        # # Calculate dose of dose grid voxels
+        # print("Convolving kernel...")
+        # kernel = PolyenergeticKernel()
+        # dose_grid_dose = np.zeros_like(self.dose_grid_terma, dtype=np.float64)
+        # phis = np.array(
+        #     sorted([p for p in kernel.cumulative.keys() if p != "radii"]),
+        #     dtype=np.float64
+        # )
+        # thetas = np.linspace(0, 360, 12, endpoint=False, dtype=np.float64)
+        # convolve_c(
+        #     self.dose_grid_terma,
+        #     dose_grid_dose,
+        #     self.dose_grid_dim,
+        #     thetas,
+        #     phis,
+        #     kernel
+        # )
+        # self.dose_grid_dose = dose_grid_dose
 
     def _in_annulus(self, r, R_inner, R_outer):
         """Check if point with distance r from origin lies inside annular
