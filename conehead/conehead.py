@@ -1,3 +1,5 @@
+from cProfile import label
+from curses import KEY_A1
 import numpy as np
 import os; os.environ["NUMBA_ENABLE_CUDASIM"] = "0"; os.environ["NUMBA_CUDA_DEBUGINFO"] = "0";
 import numba
@@ -52,7 +54,7 @@ def cuda_block_transmission(position, block_values) -> numba.float32:
 
         position[0] = math.floor(position[0] * numba.float32(100))  # Convert tenth of a mm
         position[1] = math.floor(position[1] * numba.float32(100))
-        
+
         position[0] = position[0] + numba.float32(2000)
         position[1] = position[1] + numba.float32(2000)
 
@@ -73,7 +75,7 @@ def cuda_hit_test(dose_grid_blocked, dose_grid_size, dose_grid_origin, dose_grid
 
     x, y, z = cuda.grid(3)
     if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
-        
+
         position = cuda.local.array(3, numba.float32)
         position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * x
         position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * y
@@ -88,19 +90,19 @@ def cuda_hit_test(dose_grid_blocked, dose_grid_size, dose_grid_origin, dose_grid
         for ix in range(samples):
             for iy in range(samples):
                 for iz in range(samples):
-                    
+
                     # Position of sample
                     pos_sample = cuda.local.array(3, numba.float32)
                     pos_sample[0] = position[0] - dose_grid_spacing[0]/2 + offset[0]/2 + offset[0] * ix
                     pos_sample[1] = position[1] - dose_grid_spacing[1]/2 + offset[1]/2 + offset[1] * iy
                     pos_sample[2] = position[2] - dose_grid_spacing[2]/2 + offset[2]/2 + offset[2] * iz
 
-                    # Determine position on blocking plane in global coords                      
+                    # Determine position on blocking plane in global coords
                     ray_direction = cuda.local.array(3, numba.float32)
                     ray_direction[0] = source_position[0] - pos_sample[0]
                     ray_direction[1] = source_position[1] - pos_sample[1]
                     ray_direction[2] = source_position[2] - pos_sample[2]
-                    
+
                     pos_plane = cuda.local.array(3, numba.float32)
                     pos_plane = cuda_line_block_plane_collision(pos_plane, source_position, ray_direction, source_v_y, 1e-6)
 
@@ -109,14 +111,14 @@ def cuda_hit_test(dose_grid_blocked, dose_grid_size, dose_grid_origin, dose_grid
                     pos_block[0] = cuda_dot(source_transform[0, :], pos_plane)
                     pos_block[1] = cuda_dot(source_transform[1, :], pos_plane)
                     pos_block[2] = cuda_dot(source_transform[2, :], pos_plane)
-                   
+
                     # Reduce to 2D
                     pos_block_2d = cuda.local.array(2, numba.float32)
                     pos_block_2d[0] = pos_block[0]
                     pos_block_2d[1] = pos_block[2]
 
                     block_factor = block_factor + cuda_block_transmission(pos_block_2d, block_values) / samples**3
-        
+
         dose_grid_blocked[x, y, z] = block_factor
 
 
@@ -139,13 +141,13 @@ def cuda_dda_3d(current_voxel, direction, dose_grid_spacing, dose_grid_size, vox
     t[0] = 0.0
     t[1] = 0.0
     t[2] = 0.0
-    
+
     delta_t = cuda.local.array(3, numba.float32)
     delta_t[0] = 0.0
     delta_t[1] = 0.0
     delta_t[2] = 0.0
     big_number = 1000000000.0
-    
+
     if direction[0] == 0.0:
         t[0] = big_number
         delta_t[0] = big_number
@@ -183,7 +185,7 @@ def cuda_dda_3d(current_voxel, direction, dose_grid_spacing, dose_grid_size, vox
         if t[0] < t[1]:
             if t[0] < t[2]:
                 intersection_t_values[intersection_t_values_count] = t[0]
-                intersection_t_values_count += 1              
+                intersection_t_values_count += 1
                 t[0] += delta_t[0]
                 current_voxel[0] += step[0]
             else:
@@ -217,7 +219,7 @@ def cuda_d_eff(dose_grid_size, dose_grid_origin, dose_grid_spacing, dose_grid_de
 
     if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
 
-        max_array_length = 444  # Should be equal to or larger than longest diagonal of grid 
+        max_array_length = 444  # Should be equal to or larger than longest diagonal of grid
         intersection_t_values = cuda.local.array(max_array_length, numba.float32)
         voxels_traversed = cuda.local.array((max_array_length, 3), numba.int32)
 
@@ -227,7 +229,7 @@ def cuda_d_eff(dose_grid_size, dose_grid_origin, dose_grid_spacing, dose_grid_de
         position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * y
         position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * z
 
-        # Determine direction to source                      
+        # Determine direction to source
         ray_direction = cuda.local.array(3, numba.float32)
         ray_direction[0] = source_position[0] - position[0]
         ray_direction[1] = source_position[1] - position[1]
@@ -249,7 +251,7 @@ def cuda_d_eff(dose_grid_size, dose_grid_origin, dose_grid_spacing, dose_grid_de
         d_eff[x, y, z] = 0
         for v in range(voxels_traversed_count):
             if v == 0:
-                d_eff[x, y, z] += dose_grid_densities[voxels_traversed[v, 0], voxels_traversed[v, 1], voxels_traversed[v, 2]] * (intersection_t_values[v])    
+                d_eff[x, y, z] += dose_grid_densities[voxels_traversed[v, 0], voxels_traversed[v, 1], voxels_traversed[v, 2]] * (intersection_t_values[v])
             else:
                 d_eff[x, y, z] += dose_grid_densities[voxels_traversed[v, 0], voxels_traversed[v, 1], voxels_traversed[v, 2]] * (intersection_t_values[v] - intersection_t_values[v - 1])
 
@@ -259,28 +261,28 @@ def cuda_d_eff(dose_grid_size, dose_grid_origin, dose_grid_spacing, dose_grid_de
 @cuda.jit(device=True)
 def cuda_dist_point_to_line(A, B, C):
     # A is the point, B and C are two points on the line
-    # magnitude(cross(A - B, C - B)) / magnitude(C - B). 
+    # magnitude(cross(A - B, C - B)) / magnitude(C - B).
 
     a_b = cuda.local.array(3, numba.float32)
-    a_b[0] = A[0] - B[0]    
+    a_b[0] = A[0] - B[0]
     a_b[1] = A[1] - B[1]
     a_b[2] = A[2] - B[2]
     a_b_mag = math.sqrt(a_b[0] * a_b[0] + a_b[1] * a_b[1] + a_b[2] * a_b[2])
 
     c_b = cuda.local.array(3, numba.float32)
-    c_b[0] = C[0] - B[0]    
+    c_b[0] = C[0] - B[0]
     c_b[1] = C[1] - B[1]
     c_b[2] = C[2] - B[2]
     c_b_mag = math.sqrt(c_b[0] * c_b[0] + c_b[1] * c_b[1] + c_b[2] * c_b[2])
 
     # Angle between vectors
     theta = math.acos(cuda_dot(a_b, c_b) / (a_b_mag * c_b_mag))
-    
+
     # Cross product
     a_b_cross_c_b = a_b_mag * c_b_mag * math.sin(theta)
 
     return a_b_cross_c_b / c_b_mag
-     
+
 
 
 @cuda.jit
@@ -288,7 +290,7 @@ def cuda_oad(dose_grid_oad, dose_grid_size, dose_grid_origin, dose_grid_spacing,
 
     x, y, z = cuda.grid(3)
 
-    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:   
+    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
 
         # Get voxel position
         position = cuda.local.array(3, numba.float32)
@@ -296,16 +298,16 @@ def cuda_oad(dose_grid_oad, dose_grid_size, dose_grid_origin, dose_grid_spacing,
         position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * y
         position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * z
 
-        # Determine distance/direction to source                      
+        # Determine distance/direction to source
         distance = cuda.local.array(3, numba.float32)
         distance[0] = source_position[0] - position[0]
         distance[1] = source_position[1] - position[1]
         distance[2] = source_position[2] - position[2]
 
-        # Project position to iso plane 
+        # Project position to iso plane
         pos_plane = cuda.local.array(3, numba.float32)
         pos_plane = cuda_line_block_plane_collision(pos_plane, source_position, distance, source_v_y, 1e-6)
-        
+
         # Convert to source coords
         pos_source = cuda.local.array(3, numba.float32)
         pos_source[0] = cuda_dot(source_transform[0, :], pos_plane)
@@ -330,14 +332,14 @@ def cuda_fluence(dose_grid_fluence, dose_grid_oad, dose_grid_blocked, dose_grid_
         position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * y
         position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * z
 
-        # Determine distance/direction to source                      
+        # Determine distance/direction to source
         distance = cuda.local.array(3, numba.float32)
         distance[0] = source_position[0] - position[0]
         distance[1] = source_position[1] - position[1]
         distance[2] = source_position[2] - position[2]
         mag = math.sqrt(
-            distance[0] * distance[0] + 
-            distance[1] * distance[1] + 
+            distance[0] * distance[0] +
+            distance[1] * distance[1] +
             distance[2] * distance[2]
         )
         oad = dose_grid_oad[x, y, z]
@@ -351,7 +353,7 @@ def cuda_fluence(dose_grid_fluence, dose_grid_oad, dose_grid_blocked, dose_grid_
             fluence_ann = sAnn * math.pow(source_sad - zAnn, 2) / math.pow(mag - zAnn, 2)
         else:
             fluence_ann = 0.0
-        
+
         # Exponential source
         oad = 2.0 if oad < 2.0 else oad  # Avoid function blowing up near zero
         r_exp = oad * zExp / source_sad
@@ -385,6 +387,14 @@ def cuda_terma(dose_grid_terma, dose_grid_blocked, dose_grid_fluence, dose_grid_
 @cuda.jit
 def cuda_dose(dose_grid_dose, dose_grid_spacing, dose_grid_size, dose_grid_terma, kernel_thetas, kernel_phis, kernel, source_transform):
 
+    current_voxel = cuda.local.array(3, numba.int32)
+    direction = cuda.local.array(3, numba.float32)
+    max_array_length = 444  # Should be equal to or larger than longest diagonal of grid
+    intersection_t_values = cuda.local.array(max_array_length, numba.float32)
+    voxels_traversed = cuda.local.array((max_array_length, 3), numba.int32)
+    intersection_indices = cuda.local.array(max_array_length, numba.int32)
+
+
     x, y, z = cuda.grid(3)
 
     if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
@@ -396,7 +406,7 @@ def cuda_dose(dose_grid_dose, dose_grid_spacing, dose_grid_size, dose_grid_terma
                 for j in range(len(kernel_phis)):
 
                     # Save current voxel index for later
-                    current_voxel = cuda.local.array(3, numba.int32)
+                    # current_voxel = cuda.local.array(3, numba.int32)
                     current_voxel[0] = x
                     current_voxel[1] = y
                     current_voxel[2] = z
@@ -409,23 +419,23 @@ def cuda_dose(dose_grid_dose, dose_grid_spacing, dose_grid_size, dose_grid_terma
                     s_t = math.sin(theta_rad)
                     c_p = math.cos(phi_rad)
                     s_p = math.sin(phi_rad)
-                    direction = cuda.local.array(3, numba.float32)
+                    # direction = cuda.local.array(3, numba.float32)
                     direction[0] = c_t * s_p
                     direction[1] = s_t * s_p
                     direction[2] = c_p
-                    
+
                     # Normalise
                     N = math.sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
-                    direction[0] /= N  
+                    direction[0] /= N
                     direction[1] /= N
                     direction[2] /= N
 
                     # Raycast to find voxels along cone line
                     # and boundary intersection values
-                    max_array_length = 444  # Should be equal to or larger than longest diagonal of grid 
-                    intersection_t_values = cuda.local.array(max_array_length, numba.float32)
-                    voxels_traversed = cuda.local.array((max_array_length, 3), numba.int32)
-                    cuda_dda_3d(
+                    # max_array_length = 444  # Should be equal to or larger than longest diagonal of grid
+                    # intersection_t_values = cuda.local.array(max_array_length, numba.float32)
+                    # voxels_traversed = cuda.local.array((max_array_length, 3), numba.int32)
+                    voxels_traversed_count, intersection_t_values_count = cuda_dda_3d(
                         current_voxel,
                         direction,
                         dose_grid_spacing,
@@ -436,16 +446,45 @@ def cuda_dose(dose_grid_dose, dose_grid_spacing, dose_grid_size, dose_grid_terma
 
                     # Calculate which indices in kernel data array will
                     # correspond to boundary intersection values
-                    for m in range(len(intersection_t_values)):
+                    # intersection_indices = cuda.local.array(max_array_length, numba.int32)
+                    for m in range(intersection_t_values_count):
                         intersection = intersection_t_values[m]
 
                         # Convert intersection t value to 0.1 mm and subtract 0.5 mm (first kernel point)
-                        intersection_index = intersection * 100.0 - 50.0
+                        intersection_index = abs(math.floor(intersection * 100.0 - 5.0))
+
+                        # Handle if ray larger than kernel data
+                        if intersection_index > 5995:
+                            intersection_index = 5995
+
+                        intersection_indices[m] = intersection_index
+
+
+                    for m in range(intersection_t_values_count):
+                        if m == 0:
+                            # First voxel, get appropriate kernal index
+                            # of and corresponding kernel value
+                            # (single intersection)
+                            index1 = intersection_indices[m]
+                            k3 = kernel[j, index1]
+                        else:
+                            # For al other voxels, get the diffeence
+                            # between cumulative kernal data across the
+                            # traverse of the voxel
+                            # (double intersection)
+                            index1 = intersection_indices[m]
+                            k1 = kernel[j, index1]
+                            index2 = intersection_indices[m]
+                            k2 = kernel[j, index2]
+                            k3 = k1 - k2
+
+                        cuda.atomic.add(dose_grid_dose, (voxels_traversed[m, 0], voxels_traversed[m, 1], voxels_traversed[m, 2]), T * k3)
+
+
+            # dose_grid_dose[x, y, z] = 100.0
 
 
 
-    
-            dose_grid_dose[x, y, z] = 100.0
 
 
 
@@ -468,9 +507,6 @@ def cuda_dose(dose_grid_dose, dose_grid_spacing, dose_grid_size, dose_grid_terma
 
 
 
-
-
-            
 
 class Conehead:
 
@@ -559,9 +595,9 @@ class Conehead:
             cuda.to_device(source.position),
             source.sad,
             cuda.to_device(source.transform),
-            cuda.to_device(source.v_y)            
-        ) 
-        dose_grid_oad = dose_grid_oad_device.copy_to_host()   
+            cuda.to_device(source.v_y)
+        )
+        dose_grid_oad = dose_grid_oad_device.copy_to_host()
 
 
         print("Calculating photon fluence...")
@@ -697,22 +733,27 @@ class Conehead:
 
 
         fig, ax = plt.subplots(3, 3, figsize=[12, 12])
-        ax[0, 0].imshow(dose_grid_blocked[:, 30, :])
+        ax[0, 0].imshow(dose_grid_blocked[:, 10, :])
         ax[0, 0].set_title("Hit test")
-        ax[0, 1].imshow(dose_grid_d_eff[150, :, :])
+        ax[0, 1].imshow(dose_grid_d_eff[20, :, :])
         ax[0, 1].set_title("d_eff")
-        ax[0, 2].imshow(dose_grid_oad[150, :, :])
+        ax[0, 2].imshow(dose_grid_oad[20, :, :])
         ax[0, 2].set_title("OAD")
-        ax[1, 0].imshow(dose_grid_fluence[150, :, :])
+        ax[1, 0].imshow(dose_grid_fluence[20, :, :])
         ax[1, 0].set_title("Fluence")
-        ax[1, 1].imshow(f_soften[150, :, :])
+        ax[1, 1].imshow(f_soften[20, :, :])
         ax[1, 1].set_title("Beam softening")
-        ax[1, 2].imshow(f_horn[150, :, :])
+        ax[1, 2].imshow(f_horn[20, :, :])
         ax[1, 2].set_title("Horn factor")
-        ax[2, 0].imshow(dose_grid_terma[150, :, :])
+        ax[2, 0].imshow(dose_grid_terma[20, :, :])
         ax[2, 0].set_title("TERMA")
-        ax[2, 1].imshow(dose_grid_dose[150, :, :])
-        ax[2, 1].set_title("Dose")        
+        ax[2, 1].imshow(dose_grid_dose[20, :, :])
+        ax[2, 1].set_title("Dose")
+        ax[2, 2].plot(np.linspace(self.dose_grid.origin[1], self.dose_grid.origin[1] + self.dose_grid.size[1] * self.dose_grid.spacing[1], self.dose_grid.size[1]), dose_grid_fluence[20, :, 20] / np.max(dose_grid_fluence[20, :, 20]) * 100, label="Fluence")
+        ax[2, 2].plot(np.linspace(self.dose_grid.origin[1], self.dose_grid.origin[1] + self.dose_grid.size[1] * self.dose_grid.spacing[1], self.dose_grid.size[1]), dose_grid_terma[20, :, 20] / np.max(dose_grid_terma[20, :, 20]) * 100, label="TERMA")
+        ax[2, 2].plot(np.linspace(self.dose_grid.origin[1], self.dose_grid.origin[1] + self.dose_grid.size[1] * self.dose_grid.spacing[1], self.dose_grid.size[1]), dose_grid_dose[20, :, 20] / np.max(dose_grid_dose[20, :, 20]) * 100, "o", label="Dose")
+        ax[2, 2].set_title("Dose")
+        ax[2, 2].legend()
         plt.tight_layout()
         plt.show()
 
