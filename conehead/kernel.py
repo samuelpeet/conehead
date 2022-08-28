@@ -60,6 +60,7 @@ class KernelPoly:
         self.angles = angles
         self.radii = radii
         self.kernel_diff = kernel_diff
+        self.kernel_diff = self.kernel_diff / self.kernel_diff.sum()  # normalise
         self.kernel_cum = kernel_diff.cumsum(axis=1)
         kernel_cum_interp = np.zeros((48, 5996))
         for i in range(self.kernel_cum.shape[0]):
@@ -76,6 +77,22 @@ class KernelPoly:
 
 
 # settings = {
+#     # 'stepSize': 0.1,  # Stepsize when raytracing effective depth (cm)
+#     'sPri': 0.90924,  # Primary source strength
+#     'sAnn': 2.887e-3,  # Annular source strength
+#     'zAnn': 4.0,  # Distance of annular source from point source (cm)
+#     'rInner': 0.2,  # Inner radius of annular source
+#     'rOuter': 1.4,  # Outer radius of annular source
+#     'zExp': 12.5,  # Distance of exponential source from point source (cm)
+#     'sExp': 8.289e-3,  # Exponential source strength
+#     'kExp': 0.4816,  # Exponential source exponent coefficient
+#     'softRatio': 0.0025,  # cm^-1
+#     'softLimit': 20,  # cm
+#     'hornRatio': 0.0065,  # % per cm
+#     'eLow': 0.01,  # MeV
+#     'eHigh': 7.0,  # MeV
+#     'eNum': 500,  # Spectrum samples
+#     'fluenceResampling': 3,  # Split voxels for fluence calculation
 #     'energy_weights': {  # Varian Clinac iX 6MV
 #         "0.5": 0.08196,
 #         "1.0": 0.12385,
@@ -92,21 +109,25 @@ class KernelPoly:
 #     }    
 # }
 
-# from glob import glob
+
+
+
+
+
 # print("Building Polyenergetic Kernel...")
 # kernels = {
-#     "0.5": KernelMono(glob("kernels/0.5MeV/0.5MeV.egslst")[0]),
-#     "1.0": KernelMono(glob("kernels/1.5MeV/1.5MeV.egslst")[0]),
-#     "1.5": KernelMono(glob("kernels/1.5MeV/1.5MeV.egslst")[0]),
-#     "2.0": KernelMono(glob("kernels/2.0MeV/2.0MeV.egslst")[0]),
-#     "2.5": KernelMono(glob("kernels/2.5MeV/2.5MeV.egslst")[0]),
-#     "3.0": KernelMono(glob("kernels/3.0MeV/3.0MeV.egslst")[0]),
-#     "3.5": KernelMono(glob("kernels/3.5MeV/3.5MeV.egslst")[0]),
-#     "4.0": KernelMono(glob("kernels/4.0MeV/4.0MeV.egslst")[0]),
-#     "4.5": KernelMono(glob("kernels/4.5MeV/4.5MeV.egslst")[0]),
-#     "5.0": KernelMono(glob("kernels/5.0MeV/5.0MeV.egslst")[0]),
-#     "5.5": KernelMono(glob("kernels/5.5MeV/5.5MeV.egslst")[0]),
-#     "6.0": KernelMono(glob("kernels/6.0MeV/6.0MeV.egslst")[0]),
+#     "0.5": KernelMono("kernels/0.5MeV/0.5MeV.egslst"),
+#     "1.0": KernelMono("kernels/1.5MeV/1.5MeV.egslst"),
+#     "1.5": KernelMono("kernels/1.5MeV/1.5MeV.egslst"),
+#     "2.0": KernelMono("kernels/2.0MeV/2.0MeV.egslst"),
+#     "2.5": KernelMono("kernels/2.5MeV/2.5MeV.egslst"),
+#     "3.0": KernelMono("kernels/3.0MeV/3.0MeV.egslst"),
+#     "3.5": KernelMono("kernels/3.5MeV/3.5MeV.egslst"),
+#     "4.0": KernelMono("kernels/4.0MeV/4.0MeV.egslst"),
+#     "4.5": KernelMono("kernels/4.5MeV/4.5MeV.egslst"),
+#     "5.0": KernelMono("kernels/5.0MeV/5.0MeV.egslst"),
+#     "5.5": KernelMono("kernels/5.5MeV/5.5MeV.egslst"),
+#     "6.0": KernelMono("kernels/6.0MeV/6.0MeV.egslst"),
 # }
 # kernel_diff = np.zeros_like(kernels["0.5"].kernel_diff)
 # for e in settings['energy_weights'].keys():
@@ -114,13 +135,15 @@ class KernelPoly:
 # kernel_diff = kernel_diff / kernel_diff.sum()  # normalise
 # kernel_poly = KernelPoly(kernels["0.5"].angles, kernels["0.5"].radii, kernel_diff)
 
-
-
-
-
-
-
-
+# import matplotlib.pyplot as plt
+# plt.plot(np.linspace(0.05, 60.0, 5996), kernel_poly.kernel_cum[0, :], '.')
+# plt.plot(np.linspace(0.05, 60.0, 5996), kernel_poly.kernel_cum[4, :], '.')
+# plt.plot(np.linspace(0.05, 60.0, 5996), kernel_poly.kernel_cum[8, :], '.')
+# plt.plot(np.linspace(0.05, 60.0, 5996), kernel_poly.kernel_cum[12, :], '.')
+# plt.plot(np.linspace(0.05, 60.0, 5996), kernel_poly.kernel_cum[16, :], '.')
+# plt.plot(np.linspace(0.05, 60.0, 5996), kernel_poly.kernel_cum[30, :], '.')
+# plt.plot(np.linspace(0.05, 60.0, 5996), kernel_poly.kernel_cum[47, :], '.')
+# plt.show()
 
 
 

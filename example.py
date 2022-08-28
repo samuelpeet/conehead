@@ -13,7 +13,7 @@ plan = pydicom.dcmread("RP.3DCRT.dcm", force=True)
 # Choose source
 source = Source("varian_clinac_6MV")
 source.gantry = 0
-source.collimator = 45
+source.collimator = 0
 
 # Set the jaws and MLC
 # block = Block(source.rotation, plan=plan)
@@ -37,9 +37,9 @@ settings = {
     'softRatio': 0.0025,  # cm^-1
     'softLimit': 20,  # cm
     'hornRatio': 0.0065,  # % per cm
-    'eLow': 0.01,  # MeV
-    'eHigh': 7.0,  # MeV
-    'eNum': 500,  # Spectrum samples
+    # 'eLow': 0.01,  # MeV
+    # 'eHigh': 7.0,  # MeV
+    # 'eNum': 500,  # Spectrum samples
     'fluenceResampling': 3,  # Split voxels for fluence calculation
     'energy_weights': {  # Varian Clinac iX 6MV
         "0.5": 0.08196,

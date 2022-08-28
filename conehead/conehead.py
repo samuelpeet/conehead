@@ -1,5 +1,3 @@
-from cProfile import label
-from curses import KEY_A1
 import numpy as np
 import os; os.environ["NUMBA_ENABLE_CUDASIM"] = "0"; os.environ["NUMBA_CUDA_DEBUGINFO"] = "0";
 import numba
@@ -389,7 +387,7 @@ def cuda_dose(dose_grid_dose, dose_grid_spacing, dose_grid_size, dose_grid_terma
 
     current_voxel = cuda.local.array(3, numba.int32)
     direction = cuda.local.array(3, numba.float32)
-    max_array_length = 444  # Should be equal to or larger than longest diagonal of grid
+    max_array_length = 800  # Should be equal to or larger than longest diagonal of grid (maybe? TODO)
     intersection_t_values = cuda.local.array(max_array_length, numba.float32)
     voxels_traversed = cuda.local.array((max_array_length, 3), numba.int32)
     intersection_indices = cuda.local.array(max_array_length, numba.int32)
@@ -421,14 +419,19 @@ def cuda_dose(dose_grid_dose, dose_grid_spacing, dose_grid_size, dose_grid_terma
                     s_p = math.sin(phi_rad)
                     # direction = cuda.local.array(3, numba.float32)
                     direction[0] = c_t * s_p
-                    direction[1] = s_t * s_p
-                    direction[2] = c_p
+                    direction[1] = c_p
+                    direction[2] = s_t * s_p
 
                     # Normalise
                     N = math.sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
                     direction[0] /= N
                     direction[1] /= N
                     direction[2] /= N
+
+
+                    # if i == 0:
+                    #     print(kernel_thetas[i], kernel_phis[j], direction[0], direction[1], direction[2])
+
 
                     # Raycast to find voxels along cone line
                     # and boundary intersection values
@@ -474,14 +477,20 @@ def cuda_dose(dose_grid_dose, dose_grid_spacing, dose_grid_size, dose_grid_terma
                             # (double intersection)
                             index1 = intersection_indices[m]
                             k1 = kernel[j, index1]
-                            index2 = intersection_indices[m]
+                            index2 = intersection_indices[m - 1]
                             k2 = kernel[j, index2]
                             k3 = k1 - k2
+                        
+                            # if i == 0 and j == 0:
+                            #     print(index1, index2, k1, k2, k3)
 
+                        # print(voxels_traversed[m, 0], voxels_traversed[m, 1], voxels_traversed[m, 2])
                         cuda.atomic.add(dose_grid_dose, (voxels_traversed[m, 0], voxels_traversed[m, 1], voxels_traversed[m, 2]), T * k3)
 
 
             # dose_grid_dose[x, y, z] = 100.0
+
+    # cuda.syncthreads()
 
 
 
@@ -698,7 +707,13 @@ class Conehead:
 
 
 
-
+        
+        
+        # dose_grid_terma = np.zeros_like(dose_grid_densities, dtype=np.float32)
+        # dose_grid_terma[20, 20, 20] = 1.0
+        # dose_grid_terma_device = cuda.to_device(dose_grid_terma)
+        # print(kernel_thetas)
+        # print(kernel_phis)
 
 
 
@@ -730,28 +745,28 @@ class Conehead:
 
 
 
-
+        index = 100
 
         fig, ax = plt.subplots(3, 3, figsize=[12, 12])
         ax[0, 0].imshow(dose_grid_blocked[:, 10, :])
         ax[0, 0].set_title("Hit test")
-        ax[0, 1].imshow(dose_grid_d_eff[20, :, :])
+        ax[0, 1].imshow(dose_grid_d_eff[index, :, :])
         ax[0, 1].set_title("d_eff")
-        ax[0, 2].imshow(dose_grid_oad[20, :, :])
+        ax[0, 2].imshow(dose_grid_oad[index, :, :])
         ax[0, 2].set_title("OAD")
-        ax[1, 0].imshow(dose_grid_fluence[20, :, :])
+        ax[1, 0].imshow(dose_grid_fluence[index, :, :])
         ax[1, 0].set_title("Fluence")
-        ax[1, 1].imshow(f_soften[20, :, :])
+        ax[1, 1].imshow(f_soften[index, :, :])
         ax[1, 1].set_title("Beam softening")
-        ax[1, 2].imshow(f_horn[20, :, :])
+        ax[1, 2].imshow(f_horn[index, :, :])
         ax[1, 2].set_title("Horn factor")
-        ax[2, 0].imshow(dose_grid_terma[20, :, :])
+        ax[2, 0].imshow(dose_grid_terma[index, :, :])
         ax[2, 0].set_title("TERMA")
-        ax[2, 1].imshow(dose_grid_dose[20, :, :])
+        ax[2, 1].imshow(dose_grid_dose[index, :, :])
         ax[2, 1].set_title("Dose")
-        ax[2, 2].plot(np.linspace(self.dose_grid.origin[1], self.dose_grid.origin[1] + self.dose_grid.size[1] * self.dose_grid.spacing[1], self.dose_grid.size[1]), dose_grid_fluence[20, :, 20] / np.max(dose_grid_fluence[20, :, 20]) * 100, label="Fluence")
-        ax[2, 2].plot(np.linspace(self.dose_grid.origin[1], self.dose_grid.origin[1] + self.dose_grid.size[1] * self.dose_grid.spacing[1], self.dose_grid.size[1]), dose_grid_terma[20, :, 20] / np.max(dose_grid_terma[20, :, 20]) * 100, label="TERMA")
-        ax[2, 2].plot(np.linspace(self.dose_grid.origin[1], self.dose_grid.origin[1] + self.dose_grid.size[1] * self.dose_grid.spacing[1], self.dose_grid.size[1]), dose_grid_dose[20, :, 20] / np.max(dose_grid_dose[20, :, 20]) * 100, "o", label="Dose")
+        ax[2, 2].plot(np.linspace(self.dose_grid.origin[1], self.dose_grid.origin[1] + self.dose_grid.size[1] * self.dose_grid.spacing[1], self.dose_grid.size[1]), dose_grid_fluence[index, :, index] / np.max(dose_grid_fluence[index, :, index]) * 100, label="Fluence")
+        ax[2, 2].plot(np.linspace(self.dose_grid.origin[1], self.dose_grid.origin[1] + self.dose_grid.size[1] * self.dose_grid.spacing[1], self.dose_grid.size[1]), dose_grid_terma[index, :, index] / np.max(dose_grid_terma[index, :, index]) * 100, label="TERMA")
+        ax[2, 2].plot(np.linspace(self.dose_grid.origin[1], self.dose_grid.origin[1] + self.dose_grid.size[1] * self.dose_grid.spacing[1], self.dose_grid.size[1]), dose_grid_dose[index, :, index] / np.max(dose_grid_dose[index, :, index]) * 100, label="Dose")
         ax[2, 2].set_title("Dose")
         ax[2, 2].legend()
         plt.tight_layout()
