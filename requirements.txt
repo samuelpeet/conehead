@@ -9,7 +9,7 @@ matplotlib==3.5.2
 numba==0.56.0
 numpy==1.22.4
 packaging==21.3
-Pillow==9.2.0
+Pillow==9.3.0
 pluggy==1.0.0
 py==1.11.0
 pyparsing==3.0.9
