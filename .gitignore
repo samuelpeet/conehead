@@ -110,6 +110,3 @@ venv.bak/
 # mypy
 .mypy_cache/
 
-# Temp stuff
-scratch.py
-data/
