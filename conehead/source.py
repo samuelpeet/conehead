@@ -4,19 +4,19 @@ import numpy.typing as npt
 
 class Source:
 
-    def __init__(self, model: str, sad: np.float32 = np.float32(100)):
+    def __init__(self, sad: np.float32 = np.float32(100)):
 
-        if model == "varian_clinac_6MV":
-            import conehead.varian_clinac_6MV
-            self.weights = conehead.varian_clinac_6MV.weights_ali
-        else:
-            raise NotImplementedError("The requested model is not yet"
-                                      " implemented.")
+        # if model == "varian_clinac_6MV":
+        #     import conehead.varian_clinac_6MV
+        #     self.weights = conehead.varian_clinac_6MV.weights_ali
+        # else:
+        #     raise NotImplementedError("The requested model is not yet"
+        #                               " implemented.")
 
         # Initialize source to gantry and collimator zero
         self._sad: np.float32 = sad
-        self._gantry: np.float32 = 0
-        self._collimator: np.float32 = 0
+        self._gantry: np.float32 = np.float32(0)
+        self._collimator: np.float32 = np.float32(0)
         self._position: npt.NDArray[np.float32] = np.array([0, -self._sad, 0], dtype=np.float32)
 
         # Basis of source local coordinate system
@@ -41,7 +41,7 @@ class Source:
         return self._sad
 
     @property
-    def gantry(self) -> npt.NDArray[np.float32]: 
+    def gantry(self) -> np.float32: 
         return self._gantry
 
     @gantry.setter
@@ -54,11 +54,11 @@ class Source:
             The gantry angle in degrees. Must be within the range [0, 360).
         """
         assert theta >= 0 and theta < 360, "Invalid gantry angle"
-        self._gantry: npt.NDArray[np.float32] = theta
+        self._gantry: np.float32 = theta
         self._update_geometry()
 
     @property
-    def collimator(self) -> npt.NDArray[np.float32]: 
+    def collimator(self) -> np.float32: 
         return self._collimator
 
     @collimator.setter
@@ -71,14 +71,14 @@ class Source:
             The collimator angle in degrees. Must be within the range [0, 360).
         """
         assert theta >= 0 and theta < 360, "Invalid collimator angle"
-        self._collimator: npt.NDArray[np.float32] = theta
+        self._collimator: np.float32 = theta
         self._update_geometry()
 
     def _update_geometry(self):
 
         # Set new source position
         theta = self._gantry
-        phi: np.float32 = (90 - theta) % 360  # IEC 61217
+        phi: np.float32 = (np.float32(90) - theta) % np.float32(360)  # IEC 61217
         x: np.float32 = self.sad * np.cos(phi * np.pi / 180)
         y: np.float32 = self.sad * -np.sin(phi * np.pi / 180)
         z: np.float32 = self.position[2]

@@ -1,3 +1,4 @@
+
 ###############################################################################
 #
 #  EGSnrc edknrc application input file template
@@ -36,7 +37,7 @@
 ###############################################################################
 
 
-TITLE= Energy deposition kernel for Varian 6MV photons
+TITLE= Energy deposition kernel for 1.0 MeV photons
 
 
 ##########################
@@ -60,7 +61,7 @@ PRINT OUT EDK FILE= yes # produce energy deposition file
 ##########################
 :start Monte Carlo inputs:
 
-NUMBER OF HISTORIES= 20000000 #
+NUMBER OF HISTORIES= 10000000 #
 
 INITIAL RANDOM NO. SEEDS= 1, 66
 
@@ -80,32 +81,37 @@ DOPPLER BROADENING= On # On or Off
 ##########################
 :start geometrical inputs:
 
- NUMBER OF CONES= 48  # number of cones (individual or by group)
+ NUMBER OF CONES= 12  # number of cones (individual or by group)
                       # If omitted or ZERO, pure spherical geometry
                       # assumed.
 
- ANGLES= 3.75         # ANGLES defining the geometry (reals)
-                      # No needed in pure spherical geometries.
-                      #
-                      # For group input there must be as many entries
-                      # as for the NUMBER OF CONES, i.e. :
-                      # NCON1,NCON2,...,NCONn
-                      # DANG1,DANG2,...,DANGn
-                      #
-                      # For individual input, ncones must be equal
-                      # to the number of entries, i.e.:
-                      # ncones
-                      # DANG1, DANG2,...,DANGncones
+ ANGLES= 5,10,15,20,30,40,55,70,90,120,150,180  # ANGLES defining the geometry (reals)
+                                                # No needed in pure spherical geometries.
+                                                #
+                                                # For group input there must be as many entries
+                                                # as for the NUMBER OF CONES, i.e. :
+                                                # NCON1,NCON2,...,NCONn
+                                                # DANG1,DANG2,...,DANGn
+                                                #
+                                                # For individual input, ncones must be equal
+                                                # to the number of entries, i.e.:
+                                                # ncones
+                                                # DANG1, DANG2,...,DANGncones
 
-#  NUMBER OF SPHERES = 24  # number of spheres (individual or by group)
-                           # For individual inputs as below, number of spheres can be omitted
+# NUMBER OF SPHERES = 36  # number of spheres (individual or by group)
+                         # For individual inputs as below, number of spheres can be omitted
 
- RADII= 0.05,0.1,0.15,0.2,0.3,0.4,0.5,0.6,0.8,1.0,  # radii of spheres defining the geometry (reals)
-        1.5,2.0,3.0,4.0,5.0,6.0,8.0,10.0,15.0,20.0, #
-	30.0,40.0,50.0,60.0                         # For group input there must be as many entries
-                                                    # as for the NUMBER OF SPHERES, i.e. :
-                                                    # NSPH1,NSPH2,...,NSPHn
-                                                    # DRAD1,DRAD2,...,DRADn
+RADII=  0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2,
+        0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.7, 0.8,
+        0.9, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.5,
+        3.0, 3.5, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0,
+        10.0, 12.0, 15.0, 20.0
+                                                       
+                                                       
+	                                                
+                                                       
+                                                       
+                                                       
 
 MEDIA= H2O521ICRU;              #Media in the problem:
                                 #These must match exactly, including case, one
@@ -128,7 +134,7 @@ MEDNUM= 1                       # define what medium goes where
                                 #be selected with this in mind.
 
 START REGION= 2                 #This puts water everywhere
-STOP REGION=  1153
+STOP REGION=  433
 
 :stop geometrical inputs:
 #########################
@@ -139,19 +145,19 @@ STOP REGION=  1153
 INCIDENT PARTICLE= photon          # electron,photon,positron
 
 
-INCIDENT ENERGY= monoenergetic          # monoenergetic, spectrum;
-INCIDENT KINETIC ENERGY(MEV)= 1.0 # only use for "monoenergetic"
+INCIDENT ENERGY= monoenergetic     # monoenergetic, spectrum;
+INCIDENT KINETIC ENERGY(MEV)= 1.0  # only use for "monoenergetic"
 
  #If INCIDENT ENERGY= spectrum:
- #SPEC FILENAME= /home/sam/Projects/EGSnrc/HEN_HOUSE/spectra/varian_6.spectrum
+ # SPEC FILENAME= full name of file containing energy spectrum
  # SPEC IOUTSP= include            # none,include;
                                    # none: no spectrum data in .egslst file
                                    # include: output spectrum data to .egslst file
 
 SOURCE NUMBER= 0 # 0,1,2
-                 # 0: point source AT origin,   emission along Z-axis
-                 # 1: point source AT origin,   isotropically radiating in 4Pi
-                 # 2: point source NEAR origin, emission along Z-axis
+                 # 0: Photon moving along Z axis forced to interact at origin
+                 # 1: Point source at origin, isotropically radiating into 4 Pi
+                 # 2: Same as 0 but interaction point as in old code
 
 # ZIN= 0.000001  # only for source number 2
                  # source offset on Z-axis
@@ -389,7 +395,7 @@ Set SMAX stop region= 1
  #########################
  :start plot control:
 
- PLOTTING= Off                  #Off: do not create plot files
+ PLOTTING= point                #Off: do not create plot files
                                 #histogram:  create histogram plots
                                 #point:      create xy plots
  PLOT RADIAL REGION IX= 1,2     #Indices of spheres for which to plot depth-

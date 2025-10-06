@@ -69,6 +69,9 @@ class Block:
         length : float
             Side length of square opening
         """
+        # Clear previous aperture
+        self.block_values[:, :] = np.float32(0)
+
         # Set square collimator opening
         x1 = int((self.xnum / 2) - (length / 2) * self.xres)
         x2 = int((self.xnum / 2) + (length / 2) * self.xres)

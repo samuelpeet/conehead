@@ -1,5 +1,5 @@
 import numpy as np
-import os; os.environ["NUMBA_ENABLE_CUDASIM"] = "0"; os.environ["NUMBA_CUDA_DEBUGINFO"] = "0";
+import os; os.environ["NUMBA_ENABLE_CUDASIM"] = "0"; os.environ["NUMBA_DEBUGINFO"] = "0";
 import numba
 from numba import cuda
 import matplotlib.pyplot as plt
@@ -48,7 +48,7 @@ def cuda_line_block_plane_collision(pos_plane, ray_start, ray_direction, plane_n
 
 
 @cuda.jit(device=True)
-def cuda_block_transmission(position, block_values) -> numba.float32:
+def cuda_block_transmission(position, block_values):
 
         position[0] = math.floor(position[0] * numba.float32(100))  # Convert tenth of a mm
         position[1] = math.floor(position[1] * numba.float32(100))
