@@ -54,57 +54,16 @@ class KernelMono:
             self.angles_centres = 0.5 * (angles_edges[1:] + angles_edges[:-1]) 
 
             for i in range(self.kernel.shape[0]):
-                w = 2 * np.pi * (np.cos(angles_edges[i] * np.pi / 180) - np.cos(angles_edges[i+1] * np.pi / 180))  # Angular weight for azimuthal symmetry
-                self.kernel[i, :] = self.kernel[i, :] * w  # Convert to per unit solid angle
+                self.kernel[i, :] = self.kernel[i, :] / self.radii_centres
+
+            self.kernel = self.kernel / self.kernel.sum()
            
             kernel_interp = np.zeros((n_cones, 800))
             for i in range(self.kernel.shape[0]):
                 kernel_interp[i, :] = np.interp(  # Resample to 0.25 mm
                     np.linspace(0.025, 20.0, 800),
-                    self.radii,
+                    self.radii_centres,
                     self.kernel[i, :]
                 )
             self.kernel = kernel_interp
             self.kernel = self.kernel / self.kernel.sum()
-
-    def _spherical_voxel_volumes(self, r_edges, theta_edges):
-        """
-        Compute volumes of spherical coordinate bins with azimythal symmetry,
-
-        Parameters
-        ----------
-        r_edges : array_like
-            Radial bin edges (cm). Length N+1 for N bins.
-        theta_edges : array_like
-            Polar angle bin edges (radians, 0 = forward, pi = backward). Length M+1 for M bins.
-
-        Returns
-        -------
-        volumes : ndarray
-            Array of shape (M, N), giving volume (cm^3) of each voxel element.
-        """
-        # Radial shell volumes: (r_out^3 - r_in^3)/3
-        dR = (r_edges[1:]**3 - r_edges[:-1]**3) / 3.0
-
-        # Angular wedge factor: cos(theta_min) - cos(theta_max)
-        dTheta = np.cos(theta_edges[:-1]) - np.cos(theta_edges[1:])
-
-        # Combine with 2pi for azimuthal symmetry
-        return (2 * np.pi) * np.outer(dTheta, dR)
-               
-# class KernelPoly:
-
-#     def __init__(self, angles, radii, kernel_diff) -> None:
-#         self.angles = angles
-#         self.radii = radii
-#         self.kernel_diff = kernel_diff
-#         self.kernel_diff = self.kernel_diff / self.kernel_diff.sum()  # normalise
-#         self.kernel_cum = kernel_diff.cumsum(axis=1)
-#         kernel_cum_interp = np.zeros((48, 5996))
-#         for i in range(self.kernel_cum.shape[0]):
-#             kernel_cum_interp[i, :] = np.interp(  # Resample to 0.1 mm
-#                 np.linspace(0.05, 60.0, 5996),
-#                 self.radii,
-#                 self.kernel_cum[i, :]
-#             )
-#         self.kernel_cum = kernel_cum_interp
