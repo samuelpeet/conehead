@@ -3,3 +3,4 @@ numba==0.62.1
 numpy==2.3.3
 scipy==1.16.2
 pydicom==3.0.1
+toml==0.10.2
