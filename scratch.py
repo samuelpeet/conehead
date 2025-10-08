@@ -271,9 +271,7 @@ def cuda_terma(dose_grid_terma, dose_grid_blocked, dose_grid_fluence, dose_grid_
 
 @cuda.jit
 def cuda_dose(dose_grid_dose, dose_grid_spacing, dose_grid_size, dose_grid_origin, dose_grid_densities, dose_grid_terma, kernel_thetas, kernel_phis, kernel, source_transform, n_depth_bins, kernel_depth_res_cm, max_kernel_depth_cm, ds_cm):
-    
     x, y, z = cuda.grid(3)
-
     nx = dose_grid_size[0]
     ny = dose_grid_size[1]
     nz = dose_grid_size[2]
@@ -281,100 +279,84 @@ def cuda_dose(dose_grid_dose, dose_grid_spacing, dose_grid_size, dose_grid_origi
     if x >= nx or y >= ny or z >= nz:
         return
 
-    # T = dose_grid_terma[x, y, z]
-
     dx = dose_grid_spacing[0]
     dy = dose_grid_spacing[1]
     dz = dose_grid_spacing[2]
 
-    # Centre of target voxel
     cx = dose_grid_origin[0] + (x + 0.5) * dx
     cy = dose_grid_origin[1] + (y + 0.5) * dy
     cz = dose_grid_origin[2] + (z + 0.5) * dz
 
-    
-    # accumulator for dose at this target voxel
     dose_acc = numba.float32(0.0)
-
-    # local scratch arrays for a direction vector (reduce repeated global loads)
     direction = cuda.local.array(3, numba.float32)
 
-    for i in range(len(kernel_thetas)):
-        for j in range(len(kernel_phis)):
+    n_thetas = kernel_thetas.shape[0]
+    n_phis = kernel_phis.shape[0]
 
-            # Ray-march outward from the target center along dir (toward source locations)
-            # s is physical distance from target along cone axis
+    # Precompute trigonometric values for all thetas and phis
+    theta_rad_arr = cuda.local.array(16, numba.float32)
+    phi_rad_arr = cuda.local.array(16, numba.float32)
+    c_t_arr = cuda.local.array(16, numba.float32)
+    s_t_arr = cuda.local.array(16, numba.float32)
+    c_p_arr = cuda.local.array(16, numba.float32)
+    s_p_arr = cuda.local.array(16, numba.float32)
+
+    for i in range(n_thetas):
+        theta_rad_arr[i] = kernel_thetas[i] * math.pi / 180.0
+        c_t_arr[i] = math.cos(theta_rad_arr[i])
+        s_t_arr[i] = math.sin(theta_rad_arr[i])
+    for j in range(n_phis):
+        phi_rad_arr[j] = (kernel_phis[j] - 180.0) * math.pi / 180.0
+        c_p_arr[j] = math.cos(phi_rad_arr[j])
+        s_p_arr[j] = math.sin(phi_rad_arr[j])
+
+    for i in range(n_thetas):
+        for j in range(n_phis):
             s = numba.float32(0.0)
-            rad_depth = numba.float32(0.0)   # accumulated radiological depth (g/cm^2)
-            # we march until max_kernel_depth_cm or we leave the grid
-            # compute maximum number of steps to avoid while loops that branch badly
-            max_steps = int(max_kernel_depth_cm / ds_cm)  # safe upper bound
+            rad_depth = numba.float32(0.0)
+            max_steps = int(max_kernel_depth_cm / ds_cm)
 
-            # pos = current sample position in physical coords (cm)
             px = cx
             py = cy
             pz = cz
 
-            # Calculate direction vector
-            theta_rad = kernel_thetas[i] * np.pi / 180.0
-            phi_rad = (kernel_phis[j] - 180.0) * np.pi / 180.0
-            c_t = math.cos(theta_rad)
-            s_t = math.sin(theta_rad)   
-            c_p = math.cos(phi_rad)
-            s_p = math.sin(phi_rad)
-            direction[0] = c_t * s_p
-            direction[1] = c_p
-            direction[2] = s_t * s_p
+            # Use precomputed trig values
+            direction[0] = c_t_arr[i] * s_p_arr[j]
+            direction[1] = c_p_arr[j]
+            direction[2] = s_t_arr[i] * s_p_arr[j]
             N = math.sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
             direction[0] /= N
             direction[1] /= N
             direction[2] /= N
 
-            # march loop
             for step_i in range(max_steps):
-                # advance by ds along direction
                 px += direction[0] * ds_cm
                 py += direction[1] * ds_cm
                 pz += direction[2] * ds_cm
-                s  += ds_cm
+                s += ds_cm
 
-                # map pos -> voxel integer indices (nearest neighbor)
                 ix = int((px - dose_grid_origin[0]) / dx)
                 iy = int((py - dose_grid_origin[1]) / dy)
                 iz = int((pz - dose_grid_origin[2]) / dz)
 
-                # if outside grid, stop marching this cone
                 if ix < 0 or ix >= nx or iy < 0 or iy >= ny or iz < 0 or iz >= nz:
                     break
 
-
-                # fetch local density and TERMA at the sample point
-                rho_sample = dose_grid_densities[ix, iy, iz]   # g/cm^3
-                terma_sample = dose_grid_terma[ix, iy, iz]     # MeV/g (or same units as T_target's)
-
-                # accumulate radiological depth (g/cm^2)
+                rho_sample = dose_grid_densities[ix, iy, iz]
+                terma_sample = dose_grid_terma[ix, iy, iz]
                 rad_depth += rho_sample * ds_cm
 
-                # convert radiological depth to kernel depth bin
                 depth_idx_f = rad_depth / kernel_depth_res_cm
                 depth_idx = int(depth_idx_f)
                 if depth_idx >= n_depth_bins:
-                    # kernel has no support beyond max depth
                     break
 
-                # read kernel value: kernel[c, depth_idx, radial_idx]
                 k_val = kernel[j, depth_idx]
-
-                # accumulate: kernel value * terma at sample point
-                # note: units depend on how kernel was normalised: if kernel is energy deposited per unit TERMA,
-                # then multiply by terma_sample; if kernel unitless fraction, multiply accordingly.
                 dose_acc += k_val * terma_sample
 
-                # early exit if s > max_kernel_depth_cm (safety)
                 if s >= max_kernel_depth_cm:
                     break
 
-    # write final dose to global memory (one write per voxel)
     dose_grid_dose[x, y, z] = dose_acc
  
 

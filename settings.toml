@@ -7,9 +7,6 @@ rOuter = 1.4
 zExp = 12.5
 sExp = 8.289e-3
 kExp = 0.4816
-softRatio = 0.0025
-softLimit = 20
-hornRatio = 0.0065
 fluenceResampling = 3
 
 [energy_spectrum]
