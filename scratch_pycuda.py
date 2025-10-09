@@ -801,7 +801,7 @@ off_axis_softening_dx = off_axis_softening_oads_interp[1] - off_axis_softening_o
 
 phantom = SimplePhantom()
 source = Source()
-dose_grid = DoseGrid(phantom.size, phantom.origin, phantom.spacing)
+dose_grid = DoseGrid(phantom.num_voxels, phantom.corner, phantom.resolution)
 block = Block()
 block.set_square(np.float32(10))
 dose_grid_densities = phantom.densities
