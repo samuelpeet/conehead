@@ -346,7 +346,7 @@ __global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float
 
             // Use precomputed trig values
             direction[0] = c_t_arr[it] * s_p_arr[ip];
-            direction[1] = c_t_arr[it];
+            direction[1] = c_p_arr[ip];
             direction[2] = s_t_arr[it] * s_p_arr[ip];
             float N = sqrt(direction[0]*direction[0] + direction[1]*direction[1] + direction[2]*direction[2]);
             direction[0] /= N;
@@ -358,6 +358,7 @@ __global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float
                 px += direction[0] * ds_cm;
                 py += direction[1] * ds_cm;
                 pz += direction[2] * ds_cm;
+                s += ds_cm;
 
                 int ix = (int)((px - corner[0]) / dx);
                 int iy = (int)((py - corner[1]) / dy);
@@ -380,7 +381,7 @@ __global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float
                 float kernel_value = kernel[ip, depth_idx];
                 acc += terma_sample * kernel_value;
 
-                if (s > max_kernel_depth_cm)
+                if (s >= max_kernel_depth_cm)
                 {
                     break;
                 }
