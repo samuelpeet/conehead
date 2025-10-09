@@ -1,755 +1,17 @@
 # %%
 import numpy as np
 import matplotlib.pyplot as plt
-import os; os.environ["NUMBA_ENABLE_CUDASIM"] = "0"; os.environ["NUMBA_DEBUGINFO"] = "0";
 import toml
-import numba
 import math
-from numba import cuda
+import pycuda.driver as cuda
+import pycuda.autoinit
+from pycuda.compiler import SourceModule
 from conehead.kernel import KernelMono
 from conehead.phantom import SimplePhantom
 from conehead.source import Source
 from conehead.dosegrid import DoseGrid
 from conehead.block import Block
 from conehead.nist import mu_water
-
-#%%
-import pycuda.driver as cuda
-import pycuda.autoinit
-from pycuda.compiler import SourceModule
-
-
-mod = SourceModule(
-    """
-    __device__ float dot(float *a, float *b)
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
-                   
-    __device__ float line_plane_collision(float *pos_plane, float *ray_start, float *ray_direction, float *plane_normal, float epsilon)
-    {
-        float ndotu = dot(plane_normal, ray_direction);
-        //if (abs(ndotu) < epsilon)
-        //{
-        //  return false;
-        //}
-  
-        float w[3];
-        w[0] = ray_start[0];
-        w[1] = ray_start[1];
-        w[2] = ray_start[2];
-  
-        float si = -dot(plane_normal, w) / ndotu;
-        pos_plane[0] = w[0] + si * ray_direction[0];
-        pos_plane[1] = w[1] + si * ray_direction[1];
-        pos_plane[2] = w[2] + si * ray_direction[2];
-  
-        return pos_plane;
-    }
-
-    // Clearly a target for a 2D texture in future (TODO)
-    __device__ float block_transmission(float *position, float *block_values)
-    {
-        position[0] = floor(position[0] * 100); // Convert tenth of a mm
-        position[1] = floor(position[1] * 100);
-  
-        position[0] = position[0] + 2000;
-        position[1] = position[1] + 2000;
-  
-        // Handle position lying outside the defined blocking area
-        for (int i = 0; i < 2; i++)
-        {
-            if (position[i] < 0 || position[i] > 3999)
-            {
-                return 0;
-            }
-        }
-  
-        float transmission = block_values[
-            (int)(position[0])-1,
-            (int)(position[1])-1
-        ];
-        return transmission;
-    }
-                   
-    __global__ void hit_test(float *dose_grid_blocked, int *dose_grid_size, float *dose_grid_origin, float *dose_grid_spacing, float *source_position, float *source_v_y, float *source_transform, float *block_values, int samples)
-    {
-        int x = blockIdx.x * blockDim.x + threadIdx.x;
-        int y = blockIdx.y * blockDim.y + threadIdx.y;
-        int z = blockIdx.z * blockDim.z + threadIdx.z;
-        if (x < dose_grid_size[0] && y < dose_grid_size[1] && z < dose_grid_size[2])
-        {
-            float position[3];
-            position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * x;
-            position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * y;
-            position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * z;
-  
-            float offset[3];
-            offset[0] = dose_grid_spacing[0] / samples;
-            offset[1] = dose_grid_spacing[1] / samples;
-            offset[2] = dose_grid_spacing[2] / samples;
-  
-            float block_factor = 0;
-            for (int ix = 0; ix < samples; ix++)
-            {
-                for (int iy = 0; iy < samples; iy++)
-                {
-                    for (int iz = 0; iz < samples; iz++)
-                    {
-  
-                        // Position of sample
-                        float pos_sample[3];
-                        pos_sample[0] = position[0] + offset[0]/2 + offset[0] * ix;
-                        pos_sample[1] = position[1] + offset[1]/2 + offset[1] * iy;
-                        pos_sample[2] = position[2] + offset[2]/2 + offset[2] * iz;
-  
-                        // Determine position on blocking plane in global coords
-                        float ray_direction[3];
-                        ray_direction[0] = source_position[0] - pos_sample[0];
-                        ray_direction[1] = source_position[1] - pos_sample[1];
-                        ray_direction[2] = source_position[2] - pos_sample[2];
-  
-                        float pos_plane[3];
-                        pos_plane = line_plane_collision(pos_plane, source_position, ray_direction, source_v_y, 1e-6);
-  
-                        // Convert to source coords
-                        float pos_block[3];
-                        pos_block[0] = dot(source_transform[0, :], pos_plane);
-                        pos_block[1] = dot(source_transform[1, :], pos_plane);
-                        pos_block[2] = dot(source_transform[2, :], pos_plane);
-                   
-                        // Reduce to 2D
-                        float pos_block_2d[2];
-                        pos_block_2d[0] = pos_block[0];
-                        pos_block_2d[1] = pos_block[2];
-                        block_factor = block_factor + block_transmission(pos_block_2d, block_values) / (samples*samples*samples);
-                    }
-                }
-            }
-            dose_grid_blocked[x, y, z] = block_factor;
-        }
-    }
-
-    __global__ void oad(float *dose_grid_oad, int *dose_grid_size, float *dose_grid_origin, float *dose_grid_spacing, float *source_position, float *source_transform, float *source_v_y)
-    {
-        int x = blockIdx.x * blockDim.x + threadIdx.x;
-        int y = blockIdx.y * blockDim.y + threadIdx.y;
-        int z = blockIdx.z * blockDim.z + threadIdx.z;
-  
-        if (x < dose_grid_size[0] && y < dose_grid_size[1] && z < dose_grid_size[2])
-        {
-  
-            // Get voxel position
-            float position[3];
-            position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * (x + 0.5);
-            position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * (y + 0.5);
-            position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * (z + 0.5);
-  
-            // Determine distance/direction to source
-            float distance[3];
-            distance[0] = source_position[0] - position[0];
-            distance[1] = source_position[1] - position[1];
-            distance[2] = source_position[2] - position[2];
-  
-            // Project position to iso plane
-            float pos_plane[3];
-            pos_plane = line_plane_collision(pos_plane, source_position, distance, source_v_y, 1e-6);
-  
-            // Convert to source coords
-            float pos_source[3];
-            pos_source[0] = dot(source_transform[0, :], pos_plane);
-            pos_source[1] = dot(source_transform[1, :], pos_plane);
-            pos_source[2] = dot(source_transform[2, :], pos_plane);
-            dose_grid_oad[x, y, z] = sqrt(pos_source[0] * pos_source[0] + pos_source[2] * pos_source[2]);
-        }
-    }           
-
-    // Could potentially use a texture for dose_grid_densities here (TODO)
-    __global__ void d_eff(float *d_eff, int *dose_grid_size, float *dose_grid_origin, float *dose_grid_spacing, float *dose_grid_densities, float *source_position)
-    {
-        int x = blockIdx.x * blockDim.x + threadIdx.x;
-        int y = blockIdx.y * blockDim.y + threadIdx.y;
-        int z = blockIdx.z * blockDim.z + threadIdx.z;
-        
-        if (x < dose_grid_size[0] && y < dose_grid_size[1] && z < dose_grid_size[2])
-        {
-  
-            // Get voxel position
-            float position[3];
-            position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * (x + 0.5);
-            position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * (y + 0.5);
-            position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * (z + 0.5);
-  
-            // Determine direction to source
-            float ray_direction[3];
-            ray_direction[0] = source_position[0] - position[0];
-            ray_direction[1] = source_position[1] - position[1];
-            ray_direction[2] = source_position[2] - position[2];
-            float mag = sqrt(ray_direction[0]*ray_direction[0] + ray_direction[1]*ray_direction[1] + ray_direction[2]*ray_direction[2]);
-            ray_direction[0] /= mag;
-            ray_direction[1] /= mag;
-            ray_direction[2] /= mag;
-  
-            // Precompute things
-            float ds = 0.25 * fmin(fmin(dose_grid_spacing[0], dose_grid_spacing[1]), dose_grid_spacing[2]);
-            float total_distance = mag;
-            int steps = (int)(total_distance / ds);
-            float acc = 0;
-  
-            for (int i = 0; i < steps; i++)
-            {
-                // Move a step toward source
-                position[0] += ray_direction[0] * ds;
-                position[1] += ray_direction[1] * ds;
-                position[2] += ray_direction[2] * ds;
-  
-                // Map position → voxel indices
-                int ix = (int)((position[0] - dose_grid_origin[0]) / dose_grid_spacing[0]);
-                int iy = (int)((position[1] - dose_grid_origin[1]) / dose_grid_spacing[1]);
-                int iz = (int)((position[2] - dose_grid_origin[2]) / dose_grid_spacing[2]);
-                
-                if (ix < 0 || ix >= dose_grid_size[0] || iy < 0 || iy >= dose_grid_size[1] || iz < 0 || iz >= dose_grid_size[2])
-                {
-                    break;  // Ray left grid
-                }
-
-                // Accumulate density
-                acc += dose_grid_densities[ix, iy, iz] * ds;
-            }
-
-            // Store result
-            d_eff[x, y, z] = acc;
-        }
-    }
-
-    // Could use textures at this point for both dose_grid_oad and dose_grid_blocked (TODO)               
-    __global__ void fluence(float *dose_grid_fluence, float *dose_grid_oad, float *dose_grid_blocked, int *dose_grid_size, float *dose_grid_origin, float *dose_grid_spacing, float *source_position, float *beam_profile_correction_fs_interp, float beam_profile_correction_dx, float source_sad, float sPri, float zAnn, float sAnn, float rInner, float rOuter, float zExp, float sExp, float kExp)
-    {
-        int x = blockIdx.x * blockDim.x + threadIdx.x;
-        int y = blockIdx.y * blockDim.y + threadIdx.y;
-        int z = blockIdx.z * blockDim.z + threadIdx.z;
-  
-        if (x < dose_grid_size[0] && y < dose_grid_size[1] && z < dose_grid_size[2])
-        {
-            // Get voxel position
-            float position[3];
-            position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * (x + 0.5);
-            position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * (y + 0.5);
-            position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * (z + 0.5);
-
-            // Determine distance/direction to source
-            float distance[3];
-            distance[0] = source_position[0] - position[0];
-            distance[1] = source_position[1] - position[1];
-            distance[2] = source_position[2] - position[2];
-            float mag = sqrt(
-                distance[0] * distance[0] +
-                distance[1] * distance[1] +
-                distance[2] * distance[2]
-            );
-  
-            // Point source
-            float fluence_point = sPri * pow(source_sad / mag, 2);
-  
-            float oad = dose_grid_oad[x, y, z];
-
-            // Annular source
-            float fluence_ann;
-            float r_ann = oad * zAnn / source_sad;
-            if (r_ann >= rInner && r_ann <= rOuter)
-            {
-                fluence_ann = sAnn * pow(source_sad - zAnn, 2) / pow(mag - zAnn, 2);
-            }
-            else
-            {
-                fluence_ann = 0.0;
-            }
-  
-            // Exponential source
-            if (oad < 2.0) { oad = 2.0; } // Avoid function blowing up near zero
-            float r_exp = oad * zExp / source_sad;
-            float fluence_exp = sExp / r_exp * exp(-kExp * r_exp) * pow(source_sad - zExp, 2) / pow(mag - zExp, 2);
-            
-            // Beam profile correction
-            int ix = (int)(oad / beam_profile_correction_dx);
-            float bpc = beam_profile_correction_fs_interp[ix];
-            dose_grid_fluence[x, y, z] = (fluence_point * bpc + fluence_ann + fluence_exp) * dose_grid_blocked[x, y, z];
-        }
-    }
-
-    __global__ void terma(float *dose_grid_terma, float *dose_grid_blocked, float *dose_grid_fluence, float *dose_grid_d_eff, int *dose_grid_size, float *energy, float *energy_weights, float *mu_w, float *dose_grid_oad, float *off_axis_softening_fs_interp, float off_axis_softening_dx)
-    {
-        int x = blockIdx.x * blockDim.x + threadIdx.x;
-        int y = blockIdx.y * blockDim.y + threadIdx.y;
-        int z = blockIdx.z * blockDim.z + threadIdx.z;
-  
-        if (x < dose_grid_size[0] && y < dose_grid_size[1] && z < dose_grid_size[2])
-        {
-  
-            float oad = dose_grid_oad[x, y, z];
-            int ix = (int)(oad / off_axis_softening_dx);
-            float oas = off_axis_softening_fs_interp[ix];
-  
-            float terma = 0;
-            for (int i = 0; i < sizeof(energy)/sizeof(energy[0]); i++)
-            {
-                terma += energy_weights[i] * dose_grid_fluence[x, y, z] * exp(
-                    -mu_w[i] * (dose_grid_d_eff[x, y, z] + oas)
-                ) * energy[i] * mu_w[i];
-            }
-            dose_grid_terma[x, y, z] = terma * dose_grid_blocked[x, y, z];
-        }
-    }
-
-    __global__ void dose(float *dose_grid_dose, float *dose_grid_spacing, int *dose_grid_size, float *dose_grid_origin, float *dose_grid_densities, float *dose_grid_terma, float *kernel_thetas, float *kernel_phis, float *kernel, float *source_transform, int n_depth_bins, float kernel_depth_res_cm, float max_kernel_depth_cm, float ds_cm)
-    {
-        int x = blockIdx.x * blockDim.x + threadIdx.x;
-        int y = blockIdx.y * blockDim.y + threadIdx.y;
-        int z = blockIdx.z * blockDim.z + threadIdx.z;
-        int nx = dose_grid_size[0];
-        int ny = dose_grid_size[1];
-        int nz = dose_grid_size[2];
-  
-        if (x >= nx || y >= ny || z >= nz)
-        {
-            return;
-        }
-  
-        float dx = dose_grid_spacing[0];
-        float dy = dose_grid_spacing[1];
-        float dz = dose_grid_spacing[2];
-
-        float cx = dose_grid_origin[0] + dx * (x + 0.5);
-        float cy = dose_grid_origin[1] + dy * (y + 0.5);
-        float cz = dose_grid_origin[2] + dz * (z + 0.5);
-
-        float acc = 0;
-        float direction[3];
-
-        // Baking in fixed cone angles for now
-        int n_thetas = 16;
-        int n_phis = 12;
-
-        # Precompute trigonometric values for all thetas and phis
-        float theta_rad_arr[n_thetas];
-        float phi_rad_arr[n_phis];
-        float c_t_arr[n_thetas];
-        float s_t_arr[n_thetas];
-        float c_p_arr[n_phis];
-        float s_p_arr[n_phis];
-        for (int it = 0; it < n_thetas; it++)
-        {
-            theta_rad_arr[it] = kernel_thetas[it] * 3.141592653589793 / 180.0;
-            c_t_arr[it] = cos(theta_rad_arr[it]);
-            s_t_arr[it] = sin(theta_rad_arr[it]);
-        }
-        for (int ip = 0; ip < n_phis; ip++)
-        {
-            phi_rad_arr[ip] = kernel_phis[ip] * 3.141592653589793 / 180.0;
-            c_p_arr[ip] = cos(phi_rad_arr[ip]);
-            s_p_arr[ip] = sin(phi_rad_arr[ip]);
-        }
-        for (int it = 0; it < n_thetas; it++)
-        {
-            for (int ip = 0; ip < n_phis; ip++)
-            {
-                float s - 0.0;
-                float rad_depth = 0.0;
-                max_steps = (int)(max_kernel_depth_cm / ds_cm);
-
-                float px = cx;
-                float py = cy;
-                float pz = cz;
-
-                // Use precomputed trig values
-                direction[0] = c_t_arr[it] * s_p_arr[ip];
-                direction[1] = c_t_arr[it];
-                direction[2] = s_t_arr[it] * s_p_arr[ip];
-                float N = sqrt(direction[0]*direction[0] + direction[1]*direction[1] + direction[2]*direction[2]);
-                direction[0] /= N;
-                direction[1] /= N;
-                direction[2] /= N;
-
-                for (int step = 0; step < max_steps; step++)
-                {
-                    px += direction[0] * ds_cm;
-                    py += direction[1] * ds_cm;
-                    pz += direction[2] * ds_cm;
-
-                    int ix = (int)((px - dose_grid_origin[0]) / dx);
-                    int iy = (int)((py - dose_grid_origin[1]) / dy);
-                    int iz = (int)((pz - dose_grid_origin[2]) / dz);
-
-                    if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || iz < 0 || iz >= nz)
-                    {
-                        break;  // Ray left grid
-                    }
-                    float rho_sample = dose_grid_densities[ix, iy, iz];
-                    float terma_sample = dose_grid_terma[ix, iy, iz];
-                    rad_depth += rho_sample * ds_cm;
-
-                    int depth_idx = (int)(rad_depth / kernel_depth_res_cm);
-                    if (depth_idx >= n_depth_bins)
-                    {
-                        break;  // Beyond end of kernel
-                    }
-                    float kernel_value = kernel[ip, depth_idx];
-                    acc += terma_sample * kernel_value;
-
-                    if (s > max_kernel_depth_cm)
-                    {
-                        break;
-                    }
-                }
-            }
-        }
-        dose_grid_dose[x, y, z] = acc;
-    }
-    """
-)
-
-
-# %%
-@cuda.jit(device=True)
-def cuda_dot(a, b):
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-
-@cuda.jit(device=True)
-def cuda_line_block_plane_collision(pos_plane, ray_start, ray_direction, plane_normal, epsilon):
-
-    plane_point = cuda.local.array(3, numba.float32)
-    plane_point[0] = 0
-    plane_point[1] = 0
-    plane_point[2] = 0
-
-    ndotu = cuda_dot(plane_normal, ray_direction)
-    # if abs(ndotu) < epsilon:
-    #     raise RuntimeError("no intersection or line is within plane")
-
-    w = cuda.local.array(3, numba.float32)
-    w[0] = ray_start[0] - plane_point[0]
-    w[1] = ray_start[1] - plane_point[1]
-    w[2] = ray_start[2] - plane_point[2]
-
-    si = -cuda_dot(plane_normal, w) / ndotu
-    pos_plane[0] = w[0] + si * ray_direction[0] + plane_point[0]
-    pos_plane[1] = w[1] + si * ray_direction[1] + plane_point[1]
-    pos_plane[2] = w[2] + si * ray_direction[2] + plane_point[2]
-
-    return pos_plane
-
-@cuda.jit(device=True)
-def cuda_block_transmission(position, block_values):
-
-        position[0] = math.floor(position[0] * numba.float32(100))  # Convert tenth of a mm
-        position[1] = math.floor(position[1] * numba.float32(100))
-
-        position[0] = position[0] + numba.float32(2000)
-        position[1] = position[1] + numba.float32(2000)
-
-        # Handle position lying outside the defined blocking area
-        for coord in position:
-            if coord < 0 or coord > 3999:
-                return numba.float32(0)
-
-        transmission = block_values[
-            int(position[0])-1,
-            int(position[1])-1
-        ]
-        return transmission
-
-@cuda.jit
-def cuda_hit_test(dose_grid_blocked, dose_grid_size, dose_grid_origin, dose_grid_spacing, source_position, source_v_y, source_transform, block_values, samples: int):
-
-    x, y, z = cuda.grid(3)
-    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
-
-        position = cuda.local.array(3, numba.float32)
-        position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * x
-        position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * y
-        position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * z
-
-        offset = cuda.local.array(3, numba.float32)
-        offset[0] = dose_grid_spacing[0] / samples
-        offset[1] = dose_grid_spacing[1] / samples
-        offset[2] = dose_grid_spacing[2] / samples
-
-        block_factor: numba.float32 = 0
-        for ix in range(samples):
-            for iy in range(samples):
-                for iz in range(samples):
-
-                    # Position of sample
-                    pos_sample = cuda.local.array(3, numba.float32)
-                    pos_sample[0] = position[0] + offset[0]/2 + offset[0] * ix
-                    pos_sample[1] = position[1] + offset[1]/2 + offset[1] * iy
-                    pos_sample[2] = position[2] + offset[2]/2 + offset[2] * iz
-
-                    # Determine position on blocking plane in global coords
-                    ray_direction = cuda.local.array(3, numba.float32)
-                    ray_direction[0] = source_position[0] - pos_sample[0]
-                    ray_direction[1] = source_position[1] - pos_sample[1]
-                    ray_direction[2] = source_position[2] - pos_sample[2]
-
-                    pos_plane = cuda.local.array(3, numba.float32)
-                    pos_plane = cuda_line_block_plane_collision(pos_plane, source_position, ray_direction, source_v_y, 1e-6)
-
-                    # Convert to source coords
-                    pos_block = cuda.local.array(3, numba.float32)
-                    pos_block[0] = cuda_dot(source_transform[0, :], pos_plane)
-                    pos_block[1] = cuda_dot(source_transform[1, :], pos_plane)
-                    pos_block[2] = cuda_dot(source_transform[2, :], pos_plane)
-
-                    # Reduce to 2D
-                    pos_block_2d = cuda.local.array(2, numba.float32)
-                    pos_block_2d[0] = pos_block[0]
-                    pos_block_2d[1] = pos_block[2]
-
-                    block_factor = block_factor + cuda_block_transmission(pos_block_2d, block_values) / samples**3
-
-        dose_grid_blocked[x, y, z] = block_factor
-
-@cuda.jit
-def cuda_oad(dose_grid_oad, dose_grid_size, dose_grid_origin, dose_grid_spacing, source_position, source_transform, source_v_y):
-
-    x, y, z = cuda.grid(3)
-
-    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
-
-        # Get voxel position (centre)
-        position = cuda.local.array(3, numba.float32)
-        position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * (x + 0.5)
-        position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * (y + 0.5)
-        position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * (z + 0.5)
-
-        # Determine distance/direction to source
-        distance = cuda.local.array(3, numba.float32)
-        distance[0] = source_position[0] - position[0]
-        distance[1] = source_position[1] - position[1]
-        distance[2] = source_position[2] - position[2]
-
-        # Project position to iso plane
-        pos_plane = cuda.local.array(3, numba.float32)
-        pos_plane = cuda_line_block_plane_collision(pos_plane, source_position, distance, source_v_y, 1e-6)
-
-        # Convert to source coords
-        pos_source = cuda.local.array(3, numba.float32)
-        pos_source[0] = cuda_dot(source_transform[0, :], pos_plane)
-        pos_source[1] = cuda_dot(source_transform[1, :], pos_plane)
-        pos_source[2] = cuda_dot(source_transform[2, :], pos_plane)
-        dose_grid_oad[x, y, z] = math.sqrt(pos_source[0] * pos_source[0] + pos_source[2] * pos_source[2])
-
-@cuda.jit
-def cuda_d_eff(d_eff, dose_grid_size, dose_grid_origin, dose_grid_spacing, dose_grid_densities, source_position):
-
-    x, y, z = cuda.grid(3)
-    
-    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
-
-        # Get voxel position
-        position = cuda.local.array(3, numba.float32)
-        position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * (x + 0.5)
-        position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * (y + 0.5)
-        position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * (z + 0.5)
-
-        # Determine direction to source
-        ray_direction = cuda.local.array(3, numba.float32)
-        ray_direction[0] = source_position[0] - position[0]
-        ray_direction[1] = source_position[1] - position[1]
-        ray_direction[2] = source_position[2] - position[2]
-        mag = math.sqrt(ray_direction[0]*ray_direction[0] + ray_direction[1]*ray_direction[1] + ray_direction[2]*ray_direction[2])
-        ray_direction[0] /= mag
-        ray_direction[1] /= mag
-        ray_direction[2] /= mag
-
-        # Precompute things
-        ds = 0.25 * min(dose_grid_spacing[0], dose_grid_spacing[1], dose_grid_spacing[2])
-        total_distance = mag
-        steps = int(total_distance / ds)
-        acc = numba.float32(0)
-
-        for i in range(steps):
-            # Move a step toward source
-            position[0] += ray_direction[0] * ds
-            position[1] += ray_direction[1] * ds
-            position[2] += ray_direction[2] * ds
-
-            # Map position → voxel indices
-            ix = int((position[0] - dose_grid_origin[0]) / dose_grid_spacing[0])
-            iy = int((position[1] - dose_grid_origin[1]) / dose_grid_spacing[1])
-            iz = int((position[2] - dose_grid_origin[2]) / dose_grid_spacing[2])
-
-            if (ix < 0 or ix >= dose_grid_size[0] or
-                iy < 0 or iy >= dose_grid_size[1] or
-                iz < 0 or iz >= dose_grid_size[2]):
-                break  # Ray left grid
-
-            acc += dose_grid_densities[ix, iy, iz] * ds
-
-        d_eff[x, y, z] = acc
-
-@cuda.jit
-def cuda_fluence(dose_grid_fluence, dose_grid_oad, dose_grid_blocked, dose_grid_size, dose_grid_origin, dose_grid_spacing, source_position, beam_profile_correction_fs_interp, beam_profile_correction_dx, source_sad, sPri, zAnn, sAnn, rInner, rOuter, zExp, sExp, kExp):
-    
-    x, y, z = cuda.grid(3)
-
-    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
-
-        # Get voxel position
-        position = cuda.local.array(3, numba.float32)
-        position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * (x + 0.5)
-        position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * (y + 0.5)
-        position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * (z + 0.5)
-
-        # Determine distance/direction to source
-        distance = cuda.local.array(3, numba.float32)
-        distance[0] = source_position[0] - position[0]
-        distance[1] = source_position[1] - position[1]
-        distance[2] = source_position[2] - position[2]
-        mag = math.sqrt(
-            distance[0] * distance[0] +
-            distance[1] * distance[1] +
-            distance[2] * distance[2]
-        )
-        
-        # Point source
-        fluence_point = sPri * math.pow(source_sad / mag, 2)
-
-        oad = dose_grid_oad[x, y, z]
-
-        # Annular source
-        r_ann = oad * zAnn / source_sad
-        if r_ann >= rInner and r_ann <= rOuter:
-            fluence_ann = sAnn * math.pow(source_sad - zAnn, 2) / math.pow(mag - zAnn, 2)
-        else:
-            fluence_ann = 0.0
-
-        # Exponential source
-        oad = numba.float32(2) if oad < 2.0 else oad  # Avoid function blowing up near zero
-        r_exp = oad * zExp / source_sad
-        fluence_exp = sExp / r_exp * math.exp(-kExp * r_exp) * math.pow(source_sad - zExp, 2) / math.pow(mag - zExp, 2)
-
-        # Beam profile correction
-        ix = int(oad / beam_profile_correction_dx)
-        bpc = beam_profile_correction_fs_interp[ix]
-
-        dose_grid_fluence[x, y, z] = (fluence_point * bpc + fluence_ann + fluence_exp) * dose_grid_blocked[x, y, z]
-        # dose_grid_fluence[x, y, z] = fluence_point * dose_grid_blocked[x, y, z]
-
-@cuda.jit
-# def cuda_terma(dose_grid_terma, dose_grid_blocked, dose_grid_fluence, dose_grid_d_eff, dose_grid_size, energy, energy_weights, mu_w, f_soften, f_horn):
-def cuda_terma(dose_grid_terma, dose_grid_blocked, dose_grid_fluence, dose_grid_d_eff, dose_grid_size, energy, energy_weights, mu_w, dose_grid_oad, off_axis_softening_fs_interp, off_axis_softening_dx):
-
-    x, y, z = cuda.grid(3)
-
-    if x < dose_grid_size[0] and y < dose_grid_size[1] and z < dose_grid_size[2]:
-
-        oad = dose_grid_oad[x, y, z]
-        ix = int(oad / off_axis_softening_dx)
-        oas = off_axis_softening_fs_interp[ix]
-
-        terma = numba.float32(0)
-        # for i in range(len(energy)):
-        #     terma += energy_weights[i] * dose_grid_fluence[x, y, z] * math.exp(
-        #         -mu_w[i] * f_soften[x, y, z] * dose_grid_d_eff[x, y, z]
-        #     ) * energy[i] * mu_w[i] * f_horn[x, y, z]
-        for i in range(len(energy)):
-            terma += energy_weights[i] * dose_grid_fluence[x, y, z] * math.exp(
-                -mu_w[i] * (dose_grid_d_eff[x, y, z] + oas)
-            ) * energy[i] * mu_w[i]
-        dose_grid_terma[x, y, z] = terma * dose_grid_blocked[x, y, z]
-
-@cuda.jit
-def cuda_dose(dose_grid_dose, dose_grid_spacing, dose_grid_size, dose_grid_origin, dose_grid_densities, dose_grid_terma, kernel_thetas, kernel_phis, kernel, source_transform, n_depth_bins, kernel_depth_res_cm, max_kernel_depth_cm, ds_cm):
-    x, y, z = cuda.grid(3)
-    nx = dose_grid_size[0]
-    ny = dose_grid_size[1]
-    nz = dose_grid_size[2]
-
-    if x >= nx or y >= ny or z >= nz:
-        return
-
-    dx = dose_grid_spacing[0]
-    dy = dose_grid_spacing[1]
-    dz = dose_grid_spacing[2]
-
-    cx = dose_grid_origin[0] + (x + 0.5) * dx
-    cy = dose_grid_origin[1] + (y + 0.5) * dy
-    cz = dose_grid_origin[2] + (z + 0.5) * dz
-
-    dose_acc = numba.float32(0.0)
-    direction = cuda.local.array(3, numba.float32)
-
-    n_thetas = kernel_thetas.shape[0]
-    n_phis = kernel_phis.shape[0]
-
-    # Precompute trigonometric values for all thetas and phis
-    theta_rad_arr = cuda.local.array(16, numba.float32)
-    phi_rad_arr = cuda.local.array(16, numba.float32)
-    c_t_arr = cuda.local.array(16, numba.float32)
-    s_t_arr = cuda.local.array(16, numba.float32)
-    c_p_arr = cuda.local.array(16, numba.float32)
-    s_p_arr = cuda.local.array(16, numba.float32)
-
-    for i in range(n_thetas):
-        theta_rad_arr[i] = kernel_thetas[i] * math.pi / 180.0
-        c_t_arr[i] = math.cos(theta_rad_arr[i])
-        s_t_arr[i] = math.sin(theta_rad_arr[i])
-    for j in range(n_phis):
-        phi_rad_arr[j] = (kernel_phis[j] - 180.0) * math.pi / 180.0
-        c_p_arr[j] = math.cos(phi_rad_arr[j])
-        s_p_arr[j] = math.sin(phi_rad_arr[j])
-
-    for i in range(n_thetas):
-        for j in range(n_phis):
-            s = numba.float32(0.0)
-            rad_depth = numba.float32(0.0)
-            max_steps = int(max_kernel_depth_cm / ds_cm)
-
-            px = cx
-            py = cy
-            pz = cz
-
-            # Use precomputed trig values
-            direction[0] = c_t_arr[i] * s_p_arr[j]
-            direction[1] = c_p_arr[j]
-            direction[2] = s_t_arr[i] * s_p_arr[j]
-            N = math.sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
-            direction[0] /= N
-            direction[1] /= N
-            direction[2] /= N
-
-            for step_i in range(max_steps):
-                px += direction[0] * ds_cm
-                py += direction[1] * ds_cm
-                pz += direction[2] * ds_cm
-                s += ds_cm
-
-                ix = int((px - dose_grid_origin[0]) / dx)
-                iy = int((py - dose_grid_origin[1]) / dy)
-                iz = int((pz - dose_grid_origin[2]) / dz)
-
-                if ix < 0 or ix >= nx or iy < 0 or iy >= ny or iz < 0 or iz >= nz:
-                    break
-
-                rho_sample = dose_grid_densities[ix, iy, iz]
-                terma_sample = dose_grid_terma[ix, iy, iz]
-                rad_depth += rho_sample * ds_cm
-
-                depth_idx_f = rad_depth / kernel_depth_res_cm
-                depth_idx = int(depth_idx_f)
-                if depth_idx >= n_depth_bins:
-                    break
-
-                k_val = kernel[j, depth_idx]
-                dose_acc += k_val * terma_sample
-
-                if s >= max_kernel_depth_cm:
-                    break
-
-    dose_grid_dose[x, y, z] = dose_acc
- 
-
 
 
 # %%
@@ -801,95 +63,162 @@ off_axis_softening_dx = off_axis_softening_oads_interp[1] - off_axis_softening_o
 
 phantom = SimplePhantom()
 source = Source()
-dose_grid = DoseGrid(phantom.num_voxels, phantom.corner, phantom.resolution)
+grid = DoseGrid(phantom.num_voxels, phantom.corner, phantom.resolution)
 block = Block()
 block.set_square(np.float32(10))
-dose_grid_densities = phantom.densities
+
+energies = np.array([np.float32(x) for x in settings["energy_spectrum"]["energies"]], dtype=np.float32)
+energy_weights = np.array([np.float32(x) for x in settings["energy_spectrum"]["weights"]], dtype=np.float32)
+mu_w = mu_water(energies)
+
+
+# %%
+# Create python data arrays
+density_grid = phantom.densities
+blocked_grid = np.ones(density_grid.shape, dtype=np.float32)
+oad_grid = np.zeros(density_grid.shape, dtype=np.float32)
+d_eff_grid = np.zeros(density_grid.shape, dtype=np.float32)
+fluence_grid = np.zeros(density_grid.shape, dtype=np.float32)
+terma_grid = np.zeros(density_grid.shape, dtype=np.float32)
+dose_grid = np.zeros(density_grid.shape, dtype=np.float32)
+
+# Allocate GPU memory
+density_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
+blocked_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
+oad_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
+d_eff_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
+fluence_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
+terma_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
+dose_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
+num_voxels_gpu = cuda.mem_alloc(grid.num_voxels.nbytes)
+corner_gpu = cuda.mem_alloc(grid.corner.nbytes)
+resolution_gpu = cuda.mem_alloc(grid.resolution.nbytes)
+source_position_gpu = cuda.mem_alloc(source.position.nbytes)
+source_v_x_gpu = cuda.mem_alloc(source.v_x.nbytes)
+source_v_y_gpu = cuda.mem_alloc(source.v_y.nbytes)
+source_v_z_gpu = cuda.mem_alloc(source.v_z.nbytes)
+block_values_gpu = cuda.mem_alloc(block.block_values.nbytes)
+beam_profile_correction_fs_interp_gpu = cuda.mem_alloc(beam_profile_correction_fs_interp.nbytes)
+energies_gpu = cuda.mem_alloc(energies.nbytes)
+energy_weights_gpu = cuda.mem_alloc(energy_weights.nbytes)
+mu_w_gpu = cuda.mem_alloc(mu_w.nbytes)
+off_axis_softening_fs_interp_gpu = cuda.mem_alloc(off_axis_softening_fs_interp.nbytes)
+kernel_thetas_gpu = cuda.mem_alloc(kernel_thetas.nbytes)
+kernel_phis_c_gpu = cuda.mem_alloc(kernel_phis_c.nbytes)
+kernel_gpu = cuda.mem_alloc(kernel.nbytes)
+
+
+# Compile the CUDA kernel
+cuda_code = open("conehead.cu").read()
+mod = SourceModule(cuda_code)
+
+# Extract kernel functions
+hit_test = mod.get_function("hit_test")
+oad = mod.get_function("oad")
+d_eff = mod.get_function("d_eff")
+fluence = mod.get_function("fluence")
+terma = mod.get_function("terma")
+dose = mod.get_function("dose")
+
+# Define grid/block sizes
+threadsperblock = (16, 4, 4)
+blockspergrid_x = math.ceil(density_grid.shape[0] / threadsperblock[0])
+blockspergrid_y = math.ceil(density_grid.shape[1] / threadsperblock[1])
+blockspergrid_z = math.ceil(density_grid.shape[2] / threadsperblock[2])
+blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
 
 # %%
 print("Performing hit-testing of dose grid voxels...")
-dose_grid_blocked_device = cuda.to_device(np.zeros(dose_grid.size, dtype=np.float32))
-threadsperblock = (16, 4, 4)
-blockspergrid_x = math.ceil(dose_grid_blocked_device.shape[0] / threadsperblock[0])
-blockspergrid_y = math.ceil(dose_grid_blocked_device.shape[1] / threadsperblock[1])
-blockspergrid_z = math.ceil(dose_grid_blocked_device.shape[2] / threadsperblock[2])
-blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
-cuda_hit_test[blockspergrid, threadsperblock](
-    dose_grid_blocked_device,
-    cuda.to_device(dose_grid.size),
-    cuda.to_device(dose_grid.origin),
-    cuda.to_device(dose_grid.spacing),
-    cuda.to_device(source.position),
-    cuda.to_device(source.v_y),
-    cuda.to_device(source.transform),
-    cuda.to_device(block.block_values),
-    settings["sources"]["fluenceResampling"]
+cuda.memcpy_htod(blocked_grid_gpu, blocked_grid)
+cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
+cuda.memcpy_htod(corner_gpu, grid.corner)
+cuda.memcpy_htod(resolution_gpu, grid.resolution)
+cuda.memcpy_htod(source_position_gpu, source.position)
+cuda.memcpy_htod(source_v_x_gpu, source.v_x)
+cuda.memcpy_htod(source_v_y_gpu, source.v_y)
+cuda.memcpy_htod(source_v_z_gpu, source.v_z)
+cuda.memcpy_htod(block_values_gpu, block.block_values)
+hit_test(
+    blocked_grid_gpu,
+    num_voxels_gpu,
+    corner_gpu,
+    resolution_gpu,
+    source_position_gpu,
+    source_v_x_gpu,
+    source_v_y_gpu,
+    source_v_z_gpu,
+    block_values_gpu,
+    np.int32(settings["sources"]["fluenceResampling"]),
+    block=threadsperblock,
+    grid=blockspergrid
 )
-dose_grid_blocked = dose_grid_blocked_device.copy_to_host()
-
+cuda.memcpy_dtoh(blocked_grid, blocked_grid_gpu)
 
 # %%
 print("Calculating off-axis distances")
-dose_grid_oad = np.zeros_like(dose_grid_densities, dtype=np.float32)
-dose_grid_oad_device = cuda.to_device(dose_grid_oad)
-threadsperblock = (16, 4, 4)
-blockspergrid_x = math.ceil(dose_grid_oad.shape[0] / threadsperblock[0])
-blockspergrid_y = math.ceil(dose_grid_oad.shape[1] / threadsperblock[1])
-blockspergrid_z = math.ceil(dose_grid_oad.shape[2] / threadsperblock[2])
-blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
-cuda_oad[blockspergrid, threadsperblock](
-    dose_grid_oad_device,
-    cuda.to_device(dose_grid.size),
-    cuda.to_device(dose_grid.origin),
-    cuda.to_device(dose_grid.spacing),
-    cuda.to_device(source.position),
-    cuda.to_device(source.transform),
-    cuda.to_device(source.v_y)
+cuda.memcpy_htod(oad_grid_gpu, oad_grid)
+cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
+cuda.memcpy_htod(corner_gpu, grid.corner)
+cuda.memcpy_htod(resolution_gpu, grid.resolution)
+cuda.memcpy_htod(source_position_gpu, source.position)
+cuda.memcpy_htod(source_v_x_gpu, source.v_x)
+cuda.memcpy_htod(source_v_y_gpu, source.v_y)
+cuda.memcpy_htod(source_v_z_gpu, source.v_z)
+oad(
+    oad_grid_gpu,
+    num_voxels_gpu,
+    corner_gpu,
+    resolution_gpu,
+    source_position_gpu,
+    source_v_x_gpu,
+    source_v_y_gpu,
+    source_v_z_gpu,
+    block=threadsperblock,
+    grid=blockspergrid
 )
-dose_grid_oad = dose_grid_oad_device.copy_to_host()
-
+cuda.memcpy_dtoh(oad_grid, oad_grid_gpu)
 
 # %%
 print("Calculating effective depths...")
-dose_grid_d_eff = np.zeros_like(dose_grid_densities, dtype=np.float32)
-dose_grid_d_eff_device = cuda.to_device(dose_grid_d_eff)
-threadsperblock = (16, 4, 4)
-blockspergrid_x = math.ceil(dose_grid_d_eff.shape[0] / threadsperblock[0])
-blockspergrid_y = math.ceil(dose_grid_d_eff.shape[1] / threadsperblock[1])
-blockspergrid_z = math.ceil(dose_grid_d_eff.shape[2] / threadsperblock[2])
-blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
-cuda_d_eff[blockspergrid, threadsperblock](
-    dose_grid_d_eff_device,
-    cuda.to_device(dose_grid.size),
-    cuda.to_device(dose_grid.origin),
-    cuda.to_device(dose_grid.spacing),
-    cuda.to_device(dose_grid_densities),
-    cuda.to_device(source.position),
-    
+cuda.memcpy_htod(d_eff_grid_gpu, d_eff_grid)
+cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
+cuda.memcpy_htod(corner_gpu, grid.corner)
+cuda.memcpy_htod(resolution_gpu, grid.resolution)
+cuda.memcpy_htod(density_grid_gpu, density_grid)
+cuda.memcpy_htod(source_position_gpu, source.position)
+d_eff(
+    d_eff_grid_gpu,
+    num_voxels_gpu,
+    corner_gpu,
+    resolution_gpu,
+    density_grid_gpu,
+    source_position_gpu,
+    block=threadsperblock,
+    grid=blockspergrid
 )
-dose_grid_d_eff = dose_grid_d_eff_device.copy_to_host()
-
+cuda.memcpy_dtoh(d_eff_grid, d_eff_grid_gpu)
 
 # %%
 print("Calculating photon fluence...")
-dose_grid_fluence = np.zeros_like(dose_grid_densities, dtype=np.float32)
-dose_grid_fluence_device = cuda.to_device(dose_grid_fluence)
-threadsperblock = (16, 4, 4)
-blockspergrid_x = math.ceil(dose_grid_fluence.shape[0] / threadsperblock[0])
-blockspergrid_y = math.ceil(dose_grid_fluence.shape[1] / threadsperblock[1])
-blockspergrid_z = math.ceil(dose_grid_fluence.shape[2] / threadsperblock[2])
-blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
-cuda_fluence[blockspergrid, threadsperblock](
-    dose_grid_fluence_device,
-    dose_grid_oad_device,
-    dose_grid_blocked_device,
-    cuda.to_device(dose_grid.size),
-    cuda.to_device(dose_grid.origin),
-    cuda.to_device(dose_grid.spacing),
-    cuda.to_device(source.position),
-    cuda.to_device(beam_profile_correction_fs_interp),
-    beam_profile_correction_dx,
-    source.sad,
+cuda.memcpy_htod(fluence_grid_gpu, fluence_grid)
+cuda.memcpy_htod(oad_grid_gpu, oad_grid)
+cuda.memcpy_htod(blocked_grid_gpu, blocked_grid)
+cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
+cuda.memcpy_htod(corner_gpu, grid.corner)
+cuda.memcpy_htod(resolution_gpu, grid.resolution)
+cuda.memcpy_htod(source_position_gpu, source.position)
+cuda.memcpy_htod(beam_profile_correction_fs_interp_gpu, beam_profile_correction_fs_interp)
+fluence(
+    fluence_grid_gpu,
+    oad_grid_gpu,
+    blocked_grid_gpu,
+    num_voxels_gpu,
+    corner_gpu,
+    resolution_gpu,
+    source_position_gpu,
+    beam_profile_correction_fs_interp_gpu,
+    np.float32(beam_profile_correction_dx),
+    np.float32(source.sad),
     np.float32(settings["sources"]["sPri"]),
     np.float32(settings["sources"]['zAnn']),
     np.float32(settings["sources"]['sAnn']),
@@ -897,42 +226,100 @@ cuda_fluence[blockspergrid, threadsperblock](
     np.float32(settings["sources"]['rOuter']),
     np.float32(settings["sources"]['zExp']),
     np.float32(settings["sources"]['sExp']),
-    np.float32(settings["sources"]['kExp'])
+    np.float32(settings["sources"]['kExp']),
+    block=threadsperblock,
+    grid=blockspergrid
 )
-dose_grid_fluence = dose_grid_fluence_device.copy_to_host()
-
+cuda.memcpy_dtoh(fluence_grid, fluence_grid_gpu)
 
 # %%
 print("Calculating TERMA...")
-energies = np.array([np.float32(x) for x in settings["energy_spectrum"]["energies"]], dtype=np.float32)
-energy_weights = np.array([np.float32(x) for x in settings["energy_spectrum"]["weights"]], dtype=np.float32)
-mu_w = mu_water(energies)
-dose_grid_terma = np.zeros_like(dose_grid_densities, dtype=np.float32)
-dose_grid_terma_device = cuda.to_device(dose_grid_terma)
-threadsperblock = (16, 4, 4)
-blockspergrid_x = math.ceil(dose_grid_fluence.shape[0] / threadsperblock[0])
-blockspergrid_y = math.ceil(dose_grid_fluence.shape[1] / threadsperblock[1])
-blockspergrid_z = math.ceil(dose_grid_fluence.shape[2] / threadsperblock[2])
-blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
-cuda_terma[blockspergrid, threadsperblock](
-    dose_grid_terma_device,
-    dose_grid_blocked_device,
-    dose_grid_fluence_device,
-    dose_grid_d_eff_device,
-    cuda.to_device(dose_grid.size),
-    cuda.to_device(energies),
-    cuda.to_device(energy_weights),
-    cuda.to_device(mu_w),
-    dose_grid_oad_device,
-    cuda.to_device(off_axis_softening_fs_interp),
-    off_axis_softening_dx,
+cuda.memcpy_htod(terma_grid_gpu, terma_grid)
+cuda.memcpy_htod(blocked_grid_gpu, blocked_grid)
+cuda.memcpy_htod(fluence_grid_gpu, fluence_grid)
+cuda.memcpy_htod(d_eff_grid_gpu, d_eff_grid)
+cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
+cuda.memcpy_htod(energies_gpu, energies)
+cuda.memcpy_htod(energy_weights_gpu, energy_weights)
+cuda.memcpy_htod(mu_w_gpu, mu_w)
+cuda.memcpy_htod(oad_grid_gpu, oad_grid)
+cuda.memcpy_htod(off_axis_softening_fs_interp_gpu, off_axis_softening_fs_interp)
+terma(
+    terma_grid_gpu,
+    blocked_grid_gpu,
+    fluence_grid_gpu,
+    d_eff_grid_gpu,
+    num_voxels_gpu,
+    energies_gpu,
+    energy_weights_gpu,
+    mu_w_gpu,
+    oad_grid_gpu,
+    off_axis_softening_fs_interp_gpu,
+    np.float32(off_axis_softening_dx),
+    block=threadsperblock,
+    grid=blockspergrid
 )
-dose_grid_terma = dose_grid_terma_device.copy_to_host()
+cuda.memcpy_dtoh(terma_grid, terma_grid_gpu)
 
-# tmp = dose_grid_terma[50, :, 50]
-# dose_grid_terma = np.zeros_like(dose_grid_densities, dtype=np.float32)
-# dose_grid_terma[50, :, 50] = tmp
-# dose_grid_terma[50, 50, 50] = 1e3
+
+
+
+
+
+
+# %%
+print("Calculating dose...")
+cuda.memcpy_htod(dose_grid_gpu, dose_grid)
+cuda.memcpy_htod(resolution_gpu, grid.resolution)
+cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
+cuda.memcpy_htod(corner_gpu, grid.corner)
+cuda.memcpy_htod(density_grid_gpu, density_grid)
+cuda.memcpy_htod(terma_grid_gpu, terma_grid)
+cuda.memcpy_htod(kernel_thetas_gpu, kernel_thetas)
+cuda.memcpy_htod(kernel_phis_c_gpu, kernel_phis_c)
+cuda.memcpy_htod(kernel_gpu, kernel)
+cuda.memcpy_htod(source_v_x_gpu, source.v_x)
+cuda.memcpy_htod(source_v_y_gpu, source.v_y)
+cuda.memcpy_htod(source_v_z_gpu, source.v_z)
+dose(
+    dose_grid_gpu,
+    resolution_gpu,
+    num_voxels_gpu,
+    corner_gpu,
+    density_grid_gpu,
+    terma_grid_gpu,
+    kernel_thetas_gpu,
+    kernel_phis_c_gpu,
+    kernel_gpu,
+    source_v_x_gpu,
+    source_v_y_gpu,
+    source_v_z_gpu,
+    np.int32(800),     # n depth bins
+    np.float32(0.025),   # float32 (e.g. 0.025)
+    np.float32(20),      # float32 (eg n_depth_bins * depth_res)
+    np.float32(0.025),    # float32 (ray march step, e.g. 0.025)
+    block=threadsperblock,
+    grid=blockspergrid
+)
+cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # %%
 print("Calculating dose...")

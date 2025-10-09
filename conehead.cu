@@ -42,29 +42,30 @@ __device__ float block_transmission(float *position, float *block_values)
         }
     }
 
-    float transmission = block_values[
-        (int)(position[0])-1,
-        (int)(position[1])-1
-    ];
+    int ix = (int)(position[0]) - 1;
+    int iy = (int)(position[1]) - 1;
+    // Assuming block_values is a 1D array representing a 4000x4000 grid
+    int width = 4000;
+    float transmission = block_values[ix + iy * width];
     return transmission;
 }
-                
-__global__ void hit_test(float *dose_grid_blocked, int *dose_grid_size, float *dose_grid_origin, float *dose_grid_spacing, float *source_position, float *source_v_y, float *source_transform, float *block_values, int samples)
+
+__global__ void hit_test(float *blocked_grid, int *num_voxels, float *corner, float *resolution, float *source_position, float *source_v_x, float *source_v_y, float *source_v_z, float *block_values, int samples)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
-    if (x < dose_grid_size[0] && y < dose_grid_size[1] && z < dose_grid_size[2])
+    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
     {
         float position[3];
-        position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * x;
-        position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * y;
-        position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * z;
+        position[0] = corner[0] + resolution[0] * x;
+        position[1] = corner[1] + resolution[1] * y;
+        position[2] = corner[2] + resolution[2] * z;
 
         float offset[3];
-        offset[0] = dose_grid_spacing[0] / samples;
-        offset[1] = dose_grid_spacing[1] / samples;
-        offset[2] = dose_grid_spacing[2] / samples;
+        offset[0] = resolution[0] / samples;
+        offset[1] = resolution[1] / samples;
+        offset[2] = resolution[2] / samples;
 
         float block_factor = 0;
         for (int ix = 0; ix < samples; ix++)
@@ -87,14 +88,14 @@ __global__ void hit_test(float *dose_grid_blocked, int *dose_grid_size, float *d
                     ray_direction[2] = source_position[2] - pos_sample[2];
 
                     float pos_plane[3];
-                    pos_plane = line_plane_collision(pos_plane, source_position, ray_direction, source_v_y, 1e-6);
+                    line_plane_collision(pos_plane, source_position, ray_direction, source_v_y, 1e-6);
 
                     // Convert to source coords
                     float pos_block[3];
-                    pos_block[0] = dot(source_transform[0, :], pos_plane);
-                    pos_block[1] = dot(source_transform[1, :], pos_plane);
-                    pos_block[2] = dot(source_transform[2, :], pos_plane);
-                
+                    pos_block[0] = dot(source_v_x, pos_plane);
+                    pos_block[1] = dot(source_v_y, pos_plane);
+                    pos_block[2] = dot(source_v_z, pos_plane);
+
                     // Reduce to 2D
                     float pos_block_2d[2];
                     pos_block_2d[0] = pos_block[0];
@@ -103,24 +104,24 @@ __global__ void hit_test(float *dose_grid_blocked, int *dose_grid_size, float *d
                 }
             }
         }
-        dose_grid_blocked[x, y, z] = block_factor;
+        blocked_grid[x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1]] = block_factor;
     }
 }
 
-__global__ void oad(float *dose_grid_oad, int *dose_grid_size, float *dose_grid_origin, float *dose_grid_spacing, float *source_position, float *source_transform, float *source_v_y)
+__global__ void oad(float *oad_grid, int *num_voxels, float *corner, float *resolution, float *source_position, float *source_v_x, float *source_v_y, float *source_v_z)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
 
-    if (x < dose_grid_size[0] && y < dose_grid_size[1] && z < dose_grid_size[2])
+    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
     {
 
         // Get voxel position
         float position[3];
-        position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * (x + 0.5);
-        position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * (y + 0.5);
-        position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * (z + 0.5);
+        position[0] = corner[0] + resolution[0] * (x + 0.5);
+        position[1] = corner[1] + resolution[1] * (y + 0.5);
+        position[2] = corner[2] + resolution[2] * (z + 0.5);
 
         // Determine distance/direction to source
         float distance[3];
@@ -130,32 +131,33 @@ __global__ void oad(float *dose_grid_oad, int *dose_grid_size, float *dose_grid_
 
         // Project position to iso plane
         float pos_plane[3];
-        pos_plane = line_plane_collision(pos_plane, source_position, distance, source_v_y, 1e-6);
+        line_plane_collision(pos_plane, source_position, distance, source_v_y, 1e-6);
 
         // Convert to source coords
         float pos_source[3];
-        pos_source[0] = dot(source_transform[0, :], pos_plane);
-        pos_source[1] = dot(source_transform[1, :], pos_plane);
-        pos_source[2] = dot(source_transform[2, :], pos_plane);
-        dose_grid_oad[x, y, z] = sqrt(pos_source[0] * pos_source[0] + pos_source[2] * pos_source[2]);
+        pos_source[0] = dot(source_v_x, pos_plane);
+        pos_source[1] = dot(source_v_y, pos_plane);
+        pos_source[2] = dot(source_v_z, pos_plane);
+        int idx = x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1];
+        oad_grid[idx] = sqrt(pos_source[0] * pos_source[0] + pos_source[2] * pos_source[2]);
     }
 }           
 
-// Could potentially use a texture for dose_grid_densities here (TODO)
-__global__ void d_eff(float *d_eff, int *dose_grid_size, float *dose_grid_origin, float *dose_grid_spacing, float *dose_grid_densities, float *source_position)
+// Could potentially use a texture for density_grid here (TODO)
+__global__ void d_eff(float *d_eff, int *num_voxels, float *corner, float *resolution, float *density_grid, float *source_position)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
     
-    if (x < dose_grid_size[0] && y < dose_grid_size[1] && z < dose_grid_size[2])
+    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
     {
 
         // Get voxel position
         float position[3];
-        position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * (x + 0.5);
-        position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * (y + 0.5);
-        position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * (z + 0.5);
+        position[0] = corner[0] + resolution[0] * (x + 0.5);
+        position[1] = corner[1] + resolution[1] * (y + 0.5);
+        position[2] = corner[2] + resolution[2] * (z + 0.5);
 
         // Determine direction to source
         float ray_direction[3];
@@ -168,7 +170,7 @@ __global__ void d_eff(float *d_eff, int *dose_grid_size, float *dose_grid_origin
         ray_direction[2] /= mag;
 
         // Precompute things
-        float ds = 0.25 * fmin(fmin(dose_grid_spacing[0], dose_grid_spacing[1]), dose_grid_spacing[2]);
+        float ds = 0.25 * fmin(fmin(resolution[0], resolution[1]), resolution[2]);
         float total_distance = mag;
         int steps = (int)(total_distance / ds);
         float acc = 0;
@@ -181,38 +183,40 @@ __global__ void d_eff(float *d_eff, int *dose_grid_size, float *dose_grid_origin
             position[2] += ray_direction[2] * ds;
 
             // Map position → voxel indices
-            int ix = (int)((position[0] - dose_grid_origin[0]) / dose_grid_spacing[0]);
-            int iy = (int)((position[1] - dose_grid_origin[1]) / dose_grid_spacing[1]);
-            int iz = (int)((position[2] - dose_grid_origin[2]) / dose_grid_spacing[2]);
+            int ix = (int)((position[0] - corner[0]) / resolution[0]);
+            int iy = (int)((position[1] - corner[1]) / resolution[1]);
+            int iz = (int)((position[2] - corner[2]) / resolution[2]);
             
-            if (ix < 0 || ix >= dose_grid_size[0] || iy < 0 || iy >= dose_grid_size[1] || iz < 0 || iz >= dose_grid_size[2])
+            if (ix < 0 || ix >= num_voxels[0] || iy < 0 || iy >= num_voxels[1] || iz < 0 || iz >= num_voxels[2])
             {
                 break;  // Ray left grid
             }
 
             // Accumulate density
-            acc += dose_grid_densities[ix, iy, iz] * ds;
+            int idx = ix + iy * num_voxels[0] + iz * num_voxels[0] * num_voxels[1];
+            acc += density_grid[idx] * ds;
         }
 
         // Store result
-        d_eff[x, y, z] = acc;
+        int idx = x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1];
+        d_eff[idx] = acc;
     }
 }
 
-// Could use textures at this point for both dose_grid_oad and dose_grid_blocked (TODO)               
-__global__ void fluence(float *dose_grid_fluence, float *dose_grid_oad, float *dose_grid_blocked, int *dose_grid_size, float *dose_grid_origin, float *dose_grid_spacing, float *source_position, float *beam_profile_correction_fs_interp, float beam_profile_correction_dx, float source_sad, float sPri, float zAnn, float sAnn, float rInner, float rOuter, float zExp, float sExp, float kExp)
+// Could use textures at this point for both oad_grid and blocked_grid (TODO)               
+__global__ void fluence(float *fluence_grid, float *oad_grid, float *blocked_grid, int *num_voxels, float *corner, float *resolution, float *source_position, float *beam_profile_correction_fs_interp, float beam_profile_correction_dx, float source_sad, float sPri, float zAnn, float sAnn, float rInner, float rOuter, float zExp, float sExp, float kExp)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
 
-    if (x < dose_grid_size[0] && y < dose_grid_size[1] && z < dose_grid_size[2])
+    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
     {
         // Get voxel position
         float position[3];
-        position[0] = dose_grid_origin[0] + dose_grid_spacing[0] * (x + 0.5);
-        position[1] = dose_grid_origin[1] + dose_grid_spacing[1] * (y + 0.5);
-        position[2] = dose_grid_origin[2] + dose_grid_spacing[2] * (z + 0.5);
+        position[0] = corner[0] + resolution[0] * (x + 0.5);
+        position[1] = corner[1] + resolution[1] * (y + 0.5);
+        position[2] = corner[2] + resolution[2] * (z + 0.5);
 
         // Determine distance/direction to source
         float distance[3];
@@ -228,7 +232,8 @@ __global__ void fluence(float *dose_grid_fluence, float *dose_grid_oad, float *d
         // Point source
         float fluence_point = sPri * pow(source_sad / mag, 2);
 
-        float oad = dose_grid_oad[x, y, z];
+        int idx = x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1];
+        float oad = oad_grid[idx];
 
         // Annular source
         float fluence_ann;
@@ -250,64 +255,65 @@ __global__ void fluence(float *dose_grid_fluence, float *dose_grid_oad, float *d
         // Beam profile correction
         int ix = (int)(oad / beam_profile_correction_dx);
         float bpc = beam_profile_correction_fs_interp[ix];
-        dose_grid_fluence[x, y, z] = (fluence_point * bpc + fluence_ann + fluence_exp) * dose_grid_blocked[x, y, z];
+        fluence_grid[idx] = (fluence_point * bpc + fluence_ann + fluence_exp) * blocked_grid[idx];
     }
 }
 
-__global__ void terma(float *dose_grid_terma, float *dose_grid_blocked, float *dose_grid_fluence, float *dose_grid_d_eff, int *dose_grid_size, float *energy, float *energy_weights, float *mu_w, float *dose_grid_oad, float *off_axis_softening_fs_interp, float off_axis_softening_dx)
+__global__ void terma(float *terma_grid, float *blocked_grid, float *fluence_grid, float *d_eff_grid, int *num_voxels, float *energy, float *energy_weights, float *mu_w, float *oad_grid, float *off_axis_softening_fs_interp, float off_axis_softening_dx)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
 
-    if (x < dose_grid_size[0] && y < dose_grid_size[1] && z < dose_grid_size[2])
+    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
     {
+        int idx = x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1];
 
-        float oad = dose_grid_oad[x, y, z];
+        float oad = oad_grid[idx];
         int ix = (int)(oad / off_axis_softening_dx);
         float oas = off_axis_softening_fs_interp[ix];
 
         float terma = 0;
         for (int i = 0; i < sizeof(energy)/sizeof(energy[0]); i++)
         {
-            terma += energy_weights[i] * dose_grid_fluence[x, y, z] * exp(
-                -mu_w[i] * (dose_grid_d_eff[x, y, z] + oas)
+            terma += energy_weights[i] * fluence_grid[idx] * exp(
+                -mu_w[i] * (d_eff_grid[idx] + oas)
             ) * energy[i] * mu_w[i];
         }
-        dose_grid_terma[x, y, z] = terma * dose_grid_blocked[x, y, z];
+        terma_grid[idx] = terma * blocked_grid[idx];
     }
 }
 
-__global__ void dose(float *dose_grid_dose, float *dose_grid_spacing, int *dose_grid_size, float *dose_grid_origin, float *dose_grid_densities, float *dose_grid_terma, float *kernel_thetas, float *kernel_phis, float *kernel, float *source_transform, int n_depth_bins, float kernel_depth_res_cm, float max_kernel_depth_cm, float ds_cm)
+__global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float *corner, float *density_grid, float *terma_grid, float *kernel_thetas, float *kernel_phis, float *kernel, float *source_v_x, float *source_v_y, float *source_v_z, int n_depth_bins, float kernel_depth_res_cm, float max_kernel_depth_cm, float ds_cm)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
-    int nx = dose_grid_size[0];
-    int ny = dose_grid_size[1];
-    int nz = dose_grid_size[2];
+    int nx = num_voxels[0];
+    int ny = num_voxels[1];
+    int nz = num_voxels[2];
 
     if (x >= nx || y >= ny || z >= nz)
     {
         return;
     }
 
-    float dx = dose_grid_spacing[0];
-    float dy = dose_grid_spacing[1];
-    float dz = dose_grid_spacing[2];
+    float dx = resolution[0];
+    float dy = resolution[1];
+    float dz = resolution[2];
 
-    float cx = dose_grid_origin[0] + dx * (x + 0.5);
-    float cy = dose_grid_origin[1] + dy * (y + 0.5);
-    float cz = dose_grid_origin[2] + dz * (z + 0.5);
+    float cx = corner[0] + dx * (x + 0.5);
+    float cy = corner[1] + dy * (y + 0.5);
+    float cz = corner[2] + dz * (z + 0.5);
 
     float acc = 0;
     float direction[3];
 
     // Baking in fixed cone angles for now
-    int n_thetas = 16;
-    int n_phis = 12;
+    const int n_thetas = 16;
+    const int n_phis = 12;
 
-    # Precompute trigonometric values for all thetas and phis
+    // Precompute trigonometric values for all thetas and phis
     float theta_rad_arr[n_thetas];
     float phi_rad_arr[n_phis];
     float c_t_arr[n_thetas];
@@ -330,9 +336,9 @@ __global__ void dose(float *dose_grid_dose, float *dose_grid_spacing, int *dose_
     {
         for (int ip = 0; ip < n_phis; ip++)
         {
-            float s - 0.0;
+            float s = 0.0;
             float rad_depth = 0.0;
-            max_steps = (int)(max_kernel_depth_cm / ds_cm);
+            int max_steps = (int)(max_kernel_depth_cm / ds_cm);
 
             float px = cx;
             float py = cy;
@@ -353,16 +359,17 @@ __global__ void dose(float *dose_grid_dose, float *dose_grid_spacing, int *dose_
                 py += direction[1] * ds_cm;
                 pz += direction[2] * ds_cm;
 
-                int ix = (int)((px - dose_grid_origin[0]) / dx);
-                int iy = (int)((py - dose_grid_origin[1]) / dy);
-                int iz = (int)((pz - dose_grid_origin[2]) / dz);
+                int ix = (int)((px - corner[0]) / dx);
+                int iy = (int)((py - corner[1]) / dy);
+                int iz = (int)((pz - corner[2]) / dz);
+                int idx = ix + iy * nx + iz * nx * ny;
 
                 if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || iz < 0 || iz >= nz)
                 {
                     break;  // Ray left grid
                 }
-                float rho_sample = dose_grid_densities[ix, iy, iz];
-                float terma_sample = dose_grid_terma[ix, iy, iz];
+                float rho_sample = density_grid[idx];
+                float terma_sample = terma_grid[idx];
                 rad_depth += rho_sample * ds_cm;
 
                 int depth_idx = (int)(rad_depth / kernel_depth_res_cm);
@@ -380,5 +387,6 @@ __global__ void dose(float *dose_grid_dose, float *dose_grid_spacing, int *dose_
             }
         }
     }
-    dose_grid_dose[x, y, z] = acc;
+    int idx = x + y * nx + z * nx * ny;
+    dose_grid[idx] = acc;
 }

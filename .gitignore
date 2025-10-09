@@ -110,3 +110,5 @@ venv.bak/
 # mypy
 .mypy_cache/
 
+# PyCUDA
+pycuda-2025.1.2/
