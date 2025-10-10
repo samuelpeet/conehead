@@ -306,7 +306,7 @@ __global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float
     float cy = corner[1] + dy * (y + 0.5);
     float cz = corner[2] + dz * (z + 0.5);
 
-    float acc = 0;
+    float acc = 0.0f;
     float direction[3];
 
     // Baking in fixed cone angles for now
@@ -336,8 +336,8 @@ __global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float
     {
         for (int ip = 0; ip < n_phis; ip++)
         {
-            float s = 0.0;
-            float rad_depth = 0.0;
+            float s = 0.0f;
+            float rad_depth = 0.0f;
             int max_steps = (int)(max_kernel_depth_cm / ds_cm);
 
             float px = cx;
@@ -365,6 +365,8 @@ __global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float
                 int iz = (int)((pz - corner[2]) / dz);
                 int idx = ix + iy * nx + iz * nx * ny;
 
+                // printf("%d, %d, %d\n", ix, iy, iz);
+
                 if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || iz < 0 || iz >= nz)
                 {
                     break;  // Ray left grid
@@ -372,13 +374,16 @@ __global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float
                 float rho_sample = density_grid[idx];
                 float terma_sample = terma_grid[idx];
                 rad_depth += rho_sample * ds_cm;
+                
 
                 int depth_idx = (int)(rad_depth / kernel_depth_res_cm);
+                
                 if (depth_idx >= n_depth_bins)
                 {
                     break;  // Beyond end of kernel
                 }
-                float kernel_value = kernel[ip, depth_idx];
+                float kernel_value = kernel[ip * n_depth_bins + depth_idx];
+                // printf("%d, %d, %f\n", ip, depth_idx, kernel_value);
                 acc += terma_sample * kernel_value;
 
                 if (s >= max_kernel_depth_cm)

@@ -31,7 +31,7 @@ kernels = [
     KernelMono("kernels/6.0MeV/6.0MeV.egslst"),
 ]
 
-kernel = np.zeros_like(kernels[0].kernel)
+kernel = np.zeros_like(kernels[0].kernel, dtype=np.float32)
 for i in range(len(settings["energy_spectrum"]["energies"])):
     kernel += kernels[i].kernel * settings["energy_spectrum"]["weights"][i]
 kernel = kernel / kernel.sum() # normalise
@@ -261,12 +261,6 @@ terma(
 )
 cuda.memcpy_dtoh(terma_grid, terma_grid_gpu)
 
-
-
-
-
-
-
 # %%
 print("Calculating dose...")
 cuda.memcpy_htod(dose_grid_gpu, dose_grid)
@@ -302,49 +296,3 @@ dose(
     grid=blockspergrid
 )
 cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# %%
-print("Calculating dose...")
-dose_grid_dose = np.zeros_like(dose_grid_densities, dtype=np.float32)
-dose_grid_dose_device = cuda.to_device(dose_grid_dose)
-threadsperblock = (16, 4, 4)
-blockspergrid_x = math.ceil(dose_grid_dose.shape[0] / threadsperblock[0])
-blockspergrid_y = math.ceil(dose_grid_dose.shape[1] / threadsperblock[1])
-blockspergrid_z = math.ceil(dose_grid_dose.shape[2] / threadsperblock[2])
-blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
-cuda_dose[blockspergrid, threadsperblock](
-    dose_grid_dose_device,
-    cuda.to_device(dose_grid.spacing),
-    cuda.to_device(dose_grid.size),
-    cuda.to_device(dose_grid.origin),
-    cuda.to_device(dose_grid_densities),
-    cuda.to_device(dose_grid_terma),
-    cuda.to_device(kernel_thetas),
-    cuda.to_device(kernel_phis_c),
-    cuda.to_device(kernel),
-    cuda.to_device(source.transform),
-    800,     # n depth bins
-    0.025,   # float32 (e.g. 0.025)
-    20,      # float32 (eg n_depth_bins * depth_res)
-    0.025    # float32 (ray march step, e.g. 0.025)
-)
-dose_grid_dose = dose_grid_dose_device.copy_to_host()
-# %%
