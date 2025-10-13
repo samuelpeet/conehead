@@ -259,7 +259,7 @@ __global__ void fluence(float *fluence_grid, float *oad_grid, float *blocked_gri
     }
 }
 
-__global__ void terma(float *terma_grid, float *blocked_grid, float *fluence_grid, float *d_eff_grid, int *num_voxels, float *energy, float *energy_weights, float *mu_w, float *oad_grid, float *off_axis_softening_fs_interp, float off_axis_softening_dx)
+__global__ void terma(float *terma_grid, float *blocked_grid, float *fluence_grid, float *d_eff_grid, int *num_voxels, int num_energies, float *energy, float *energy_weights, float *mu_w, float *oad_grid, float *off_axis_softening_fs_interp, float off_axis_softening_dx)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -274,17 +274,65 @@ __global__ void terma(float *terma_grid, float *blocked_grid, float *fluence_gri
         float oas = off_axis_softening_fs_interp[ix];
 
         float terma = 0;
-        for (int i = 0; i < sizeof(energy)/sizeof(energy[0]); i++)
+        for (int i = 0; i < num_energies; i++)
         {
             terma += energy_weights[i] * fluence_grid[idx] * exp(
                 -mu_w[i] * (d_eff_grid[idx] + oas)
-            ) * energy[i] * mu_w[i];
+            ) * energy[i] * mu_w[i];           
         }
         terma_grid[idx] = terma * blocked_grid[idx];
     }
 }
 
-__global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float *corner, float *density_grid, float *terma_grid, float *kernel_thetas, float *kernel_phis, float *kernel, float *source_v_x, float *source_v_y, float *source_v_z, int n_depth_bins, float kernel_depth_res_cm, float max_kernel_depth_cm, float ds_cm)
+__global__ void mask(float *mask_grid, float *terma_grid, int *num_voxels, float *corner, float *resolution, float max_distance_cm, float terma_threshold)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int z = blockIdx.z * blockDim.z + threadIdx.z;
+
+    int max_voxels_distance = (int)(max_distance_cm / fmin(resolution[0], fmin(resolution[1], resolution[2])));
+
+    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
+    {
+        int idx = x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1];
+
+        // We check 8 directions (±x, ±y, ±z)
+        for (int ix = -1; ix <= 1; ix = ix + 2)  // Just alternate from negative to positive 1
+        {
+            for (int iy = -1; iy <= 1; iy = iy + 2)
+            {
+                for (int iz = -1; iz <= 1; iz = iz + 2)
+                {
+                    for (int v = 0; v <= max_voxels_distance; v++)
+                    {
+                        int nx = x + ix * v;
+                        int ny = y + iy * v;
+                        int nz = z + iz * v;
+
+                        // Ensure neighbor indices are within bounds
+                        if (nx >= 0 && nx < num_voxels[0] &&
+                            ny >= 0 && ny < num_voxels[1] &&
+                            nz >= 0 && nz < num_voxels[2])
+                        {
+                            int n_idx = nx + ny * num_voxels[0] + nz * num_voxels[0] * num_voxels[1];
+                            // printf("Checking neighbor voxel (%d, %d, %d): terma = %f, threshold = %f\n ", nx, ny, nz, terma_grid[n_idx], terma_threshold);
+                            if (terma_grid[n_idx] >= terma_threshold)
+                            {
+                                // printf("Setting voxel (%d, %d, %d) to 1.0\n", x, y, z);
+                                mask_grid[idx] = 1.0f;
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // printf("Zero (%d, %d, %d)\n", x, y, z);
+        mask_grid[idx] = 0.0f;  // No neighbors within threshold
+    }
+}
+
+__global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float *corner, float *density_grid, float *terma_grid, float *mask_grid, float *kernel_thetas, float *kernel_phis, float *kernel, float *source_v_x, float *source_v_y, float *source_v_z, int n_depth_bins, float kernel_depth_res_cm, float max_kernel_depth_cm, float ds_cm)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -292,10 +340,18 @@ __global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float
     int nx = num_voxels[0];
     int ny = num_voxels[1];
     int nz = num_voxels[2];
+    int idx = x + y * nx + z * nx * ny;
 
     if (x >= nx || y >= ny || z >= nz)
     {
         return;
+    }
+
+    if (mask_grid[idx] == 0.0f)
+    {
+        // Skip convolution for this voxel
+        dose_grid[idx] = terma_grid[idx];
+        return;  
     }
 
     float dx = resolution[0];
@@ -328,7 +384,7 @@ __global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float
     }
     for (int ip = 0; ip < n_phis; ip++)
     {
-        phi_rad_arr[ip] = kernel_phis[ip] * 3.141592653589793 / 180.0;
+        phi_rad_arr[ip] = (kernel_phis[ip] - 180.0) * 3.141592653589793 / 180.0;
         c_p_arr[ip] = cos(phi_rad_arr[ip]);
         s_p_arr[ip] = sin(phi_rad_arr[ip]);
     }
@@ -393,6 +449,136 @@ __global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float
             }
         }
     }
+    dose_grid[idx] = acc;
+}
+
+
+
+
+
+__global__ void active_dose(float *dose_grid, float *resolution, int *num_voxels, float *corner, float *density_grid, float *terma_grid, float *mask_grid, float *kernel_thetas, float *kernel_phis, float *kernel, float *source_v_x, float *source_v_y, float *source_v_z, int n_depth_bins, float kernel_depth_res_cm, float max_kernel_depth_cm, float ds_cm, int active_dose_interp_skip, float active_dose_interp_terma_threshold, float active_dose_interp_dose_threshold)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int z = blockIdx.z * blockDim.z + threadIdx.z;
+    int nx = num_voxels[0];
+    int ny = num_voxels[1];
+    int nz = num_voxels[2];
     int idx = x + y * nx + z * nx * ny;
+
+    if (x >= nx || y >= ny || z >= nz)
+    {
+        return;
+    }
+
+    if (x % active_dose_interp_skip != 0 || y % active_dose_interp_skip != 0 || z % active_dose_interp_skip != 0)
+    {
+        // Skip this voxel
+        // printf("Skipping voxel (%d, %d, %d)\n", x, y, z);
+        return;  
+    }
+
+    if (mask_grid[idx] == 0.0f)
+    {
+        // Skip convolution for this voxel
+        dose_grid[idx] = terma_grid[idx];
+        return;  
+    }
+
+    float dx = resolution[0];
+    float dy = resolution[1];
+    float dz = resolution[2];
+
+    float cx = corner[0] + dx * (x + 0.5);
+    float cy = corner[1] + dy * (y + 0.5);
+    float cz = corner[2] + dz * (z + 0.5);
+
+    float acc = 0.0f;
+    float direction[3];
+
+    // Baking in fixed cone angles for now
+    const int n_thetas = 16;
+    const int n_phis = 12;
+
+    // Precompute trigonometric values for all thetas and phis
+    float theta_rad_arr[n_thetas];
+    float phi_rad_arr[n_phis];
+    float c_t_arr[n_thetas];
+    float s_t_arr[n_thetas];
+    float c_p_arr[n_phis];
+    float s_p_arr[n_phis];
+    for (int it = 0; it < n_thetas; it++)
+    {
+        theta_rad_arr[it] = kernel_thetas[it] * 3.141592653589793 / 180.0;
+        c_t_arr[it] = cos(theta_rad_arr[it]);
+        s_t_arr[it] = sin(theta_rad_arr[it]);
+    }
+    for (int ip = 0; ip < n_phis; ip++)
+    {
+        phi_rad_arr[ip] = (kernel_phis[ip] - 180.0) * 3.141592653589793 / 180.0;
+        c_p_arr[ip] = cos(phi_rad_arr[ip]);
+        s_p_arr[ip] = sin(phi_rad_arr[ip]);
+    }
+    for (int it = 0; it < n_thetas; it++)
+    {
+        for (int ip = 0; ip < n_phis; ip++)
+        {
+            float s = 0.0f;
+            float rad_depth = 0.0f;
+            int max_steps = (int)(max_kernel_depth_cm / ds_cm);
+
+            float px = cx;
+            float py = cy;
+            float pz = cz;
+
+            // Use precomputed trig values
+            direction[0] = c_t_arr[it] * s_p_arr[ip];
+            direction[1] = c_p_arr[ip];
+            direction[2] = s_t_arr[it] * s_p_arr[ip];
+            float N = sqrt(direction[0]*direction[0] + direction[1]*direction[1] + direction[2]*direction[2]);
+            direction[0] /= N;
+            direction[1] /= N;
+            direction[2] /= N;
+
+            for (int step = 0; step < max_steps; step++)
+            {
+                px += direction[0] * ds_cm;
+                py += direction[1] * ds_cm;
+                pz += direction[2] * ds_cm;
+                s += ds_cm;
+
+                int ix = (int)((px - corner[0]) / dx);
+                int iy = (int)((py - corner[1]) / dy);
+                int iz = (int)((pz - corner[2]) / dz);
+                int idx = ix + iy * nx + iz * nx * ny;
+
+                // printf("%d, %d, %d\n", ix, iy, iz);
+
+                if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || iz < 0 || iz >= nz)
+                {
+                    break;  // Ray left grid
+                }
+                float rho_sample = density_grid[idx];
+                float terma_sample = terma_grid[idx];
+                rad_depth += rho_sample * ds_cm;
+                
+
+                int depth_idx = (int)(rad_depth / kernel_depth_res_cm);
+                
+                if (depth_idx >= n_depth_bins)
+                {
+                    break;  // Beyond end of kernel
+                }
+                float kernel_value = kernel[ip * n_depth_bins + depth_idx];
+                // printf("%d, %d, %f\n", ip, depth_idx, kernel_value);
+                acc += terma_sample * kernel_value;
+
+                if (s >= max_kernel_depth_cm)
+                {
+                    break;
+                }
+            }
+        }
+    }
     dose_grid[idx] = acc;
 }

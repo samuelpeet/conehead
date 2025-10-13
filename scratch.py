@@ -411,14 +411,14 @@ off_axis_softening_dx = off_axis_softening_oads_interp[1] - off_axis_softening_o
 
 phantom = SimplePhantom()
 source = Source()
-dose_grid = DoseGrid(phantom.size, phantom.origin, phantom.spacing)
+dose_grid = DoseGrid(phantom.num_voxels, phantom.corner, phantom.resolution)
 block = Block()
 block.set_square(np.float32(10))
 dose_grid_densities = phantom.densities
 
 # %%
 print("Performing hit-testing of dose grid voxels...")
-dose_grid_blocked_device = cuda.to_device(np.zeros(dose_grid.size, dtype=np.float32))
+dose_grid_blocked_device = cuda.to_device(np.zeros(dose_grid.num_voxels, dtype=np.float32))
 threadsperblock = (16, 4, 4)
 blockspergrid_x = math.ceil(dose_grid_blocked_device.shape[0] / threadsperblock[0])
 blockspergrid_y = math.ceil(dose_grid_blocked_device.shape[1] / threadsperblock[1])
@@ -426,14 +426,14 @@ blockspergrid_z = math.ceil(dose_grid_blocked_device.shape[2] / threadsperblock[
 blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
 cuda_hit_test[blockspergrid, threadsperblock](
     dose_grid_blocked_device,
-    cuda.to_device(dose_grid.size),
-    cuda.to_device(dose_grid.origin),
-    cuda.to_device(dose_grid.spacing),
+    cuda.to_device(dose_grid.num_voxels),
+    cuda.to_device(dose_grid.corner),
+    cuda.to_device(dose_grid.resolution),
     cuda.to_device(source.position),
     cuda.to_device(source.v_y),
     cuda.to_device(source.transform),
     cuda.to_device(block.block_values),
-    settings["sources"]["fluenceResampling"]
+    settings["calculation"]["fluence_resampling"]
 )
 dose_grid_blocked = dose_grid_blocked_device.copy_to_host()
 
@@ -449,9 +449,9 @@ blockspergrid_z = math.ceil(dose_grid_oad.shape[2] / threadsperblock[2])
 blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
 cuda_oad[blockspergrid, threadsperblock](
     dose_grid_oad_device,
-    cuda.to_device(dose_grid.size),
-    cuda.to_device(dose_grid.origin),
-    cuda.to_device(dose_grid.spacing),
+    cuda.to_device(dose_grid.num_voxels),
+    cuda.to_device(dose_grid.corner),
+    cuda.to_device(dose_grid.resolution),
     cuda.to_device(source.position),
     cuda.to_device(source.transform),
     cuda.to_device(source.v_y)
@@ -470,9 +470,9 @@ blockspergrid_z = math.ceil(dose_grid_d_eff.shape[2] / threadsperblock[2])
 blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
 cuda_d_eff[blockspergrid, threadsperblock](
     dose_grid_d_eff_device,
-    cuda.to_device(dose_grid.size),
-    cuda.to_device(dose_grid.origin),
-    cuda.to_device(dose_grid.spacing),
+    cuda.to_device(dose_grid.num_voxels),
+    cuda.to_device(dose_grid.corner),
+    cuda.to_device(dose_grid.resolution),
     cuda.to_device(dose_grid_densities),
     cuda.to_device(source.position),
     
@@ -493,21 +493,21 @@ cuda_fluence[blockspergrid, threadsperblock](
     dose_grid_fluence_device,
     dose_grid_oad_device,
     dose_grid_blocked_device,
-    cuda.to_device(dose_grid.size),
-    cuda.to_device(dose_grid.origin),
-    cuda.to_device(dose_grid.spacing),
+    cuda.to_device(dose_grid.num_voxels),
+    cuda.to_device(dose_grid.corner),
+    cuda.to_device(dose_grid.resolution),
     cuda.to_device(source.position),
     cuda.to_device(beam_profile_correction_fs_interp),
     beam_profile_correction_dx,
     source.sad,
-    np.float32(settings["sources"]["sPri"]),
-    np.float32(settings["sources"]['zAnn']),
-    np.float32(settings["sources"]['sAnn']),
-    np.float32(settings["sources"]['rInner']),
-    np.float32(settings["sources"]['rOuter']),
-    np.float32(settings["sources"]['zExp']),
-    np.float32(settings["sources"]['sExp']),
-    np.float32(settings["sources"]['kExp'])
+    np.float32(settings["sources"]["s_pri"]),
+    np.float32(settings["sources"]['z_ann']),
+    np.float32(settings["sources"]['s_ann']),
+    np.float32(settings["sources"]['r_inner']),
+    np.float32(settings["sources"]['r_outer']),
+    np.float32(settings["sources"]['z_exp']),
+    np.float32(settings["sources"]['s_exp']),
+    np.float32(settings["sources"]['k_exp'])
 )
 dose_grid_fluence = dose_grid_fluence_device.copy_to_host()
 
@@ -529,7 +529,7 @@ cuda_terma[blockspergrid, threadsperblock](
     dose_grid_blocked_device,
     dose_grid_fluence_device,
     dose_grid_d_eff_device,
-    cuda.to_device(dose_grid.size),
+    cuda.to_device(dose_grid.num_voxels),
     cuda.to_device(energies),
     cuda.to_device(energy_weights),
     cuda.to_device(mu_w),
@@ -555,9 +555,9 @@ blockspergrid_z = math.ceil(dose_grid_dose.shape[2] / threadsperblock[2])
 blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
 cuda_dose[blockspergrid, threadsperblock](
     dose_grid_dose_device,
-    cuda.to_device(dose_grid.spacing),
-    cuda.to_device(dose_grid.size),
-    cuda.to_device(dose_grid.origin),
+    cuda.to_device(dose_grid.resolution),
+    cuda.to_device(dose_grid.num_voxels),
+    cuda.to_device(dose_grid.corner),
     cuda.to_device(dose_grid_densities),
     cuda.to_device(dose_grid_terma),
     cuda.to_device(kernel_thetas),

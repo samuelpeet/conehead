@@ -80,6 +80,7 @@ oad_grid = np.zeros(density_grid.shape, dtype=np.float32)
 d_eff_grid = np.zeros(density_grid.shape, dtype=np.float32)
 fluence_grid = np.zeros(density_grid.shape, dtype=np.float32)
 terma_grid = np.zeros(density_grid.shape, dtype=np.float32)
+mask_grid = np.zeros(density_grid.shape, dtype=np.float32)
 dose_grid = np.zeros(density_grid.shape, dtype=np.float32)
 
 # Allocate GPU memory
@@ -89,6 +90,7 @@ oad_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 d_eff_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 fluence_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 terma_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
+mask_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 dose_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 num_voxels_gpu = cuda.mem_alloc(grid.num_voxels.nbytes)
 corner_gpu = cuda.mem_alloc(grid.corner.nbytes)
@@ -118,7 +120,9 @@ oad = mod.get_function("oad")
 d_eff = mod.get_function("d_eff")
 fluence = mod.get_function("fluence")
 terma = mod.get_function("terma")
+mask = mod.get_function("mask")
 dose = mod.get_function("dose")
+active_dose = mod.get_function("active_dose")
 
 # Define grid/block sizes
 threadsperblock = (16, 4, 4)
@@ -148,7 +152,7 @@ hit_test(
     source_v_y_gpu,
     source_v_z_gpu,
     block_values_gpu,
-    np.int32(settings["sources"]["fluenceResampling"]),
+    np.int32(settings["calculation"]["fluence_resampling"]),
     block=threadsperblock,
     grid=blockspergrid
 )
@@ -186,6 +190,9 @@ cuda.memcpy_htod(corner_gpu, grid.corner)
 cuda.memcpy_htod(resolution_gpu, grid.resolution)
 cuda.memcpy_htod(density_grid_gpu, density_grid)
 cuda.memcpy_htod(source_position_gpu, source.position)
+# start_evt = cuda.Event()
+# end_evt = cuda.Event()
+# start_evt.record()
 d_eff(
     d_eff_grid_gpu,
     num_voxels_gpu,
@@ -194,8 +201,12 @@ d_eff(
     density_grid_gpu,
     source_position_gpu,
     block=threadsperblock,
-    grid=blockspergrid
+    grid=blockspergrid,
 )
+# end_evt.record()
+# end_evt.synchronize()
+# elapsed_time_ms = start_evt.time_till(end_evt)
+# print(f"GPU operation took {elapsed_time_ms:.3f} ms")
 cuda.memcpy_dtoh(d_eff_grid, d_eff_grid_gpu)
 
 # %%
@@ -219,14 +230,14 @@ fluence(
     beam_profile_correction_fs_interp_gpu,
     np.float32(beam_profile_correction_dx),
     np.float32(source.sad),
-    np.float32(settings["sources"]["sPri"]),
-    np.float32(settings["sources"]['zAnn']),
-    np.float32(settings["sources"]['sAnn']),
-    np.float32(settings["sources"]['rInner']),
-    np.float32(settings["sources"]['rOuter']),
-    np.float32(settings["sources"]['zExp']),
-    np.float32(settings["sources"]['sExp']),
-    np.float32(settings["sources"]['kExp']),
+    np.float32(settings["sources"]["s_pri"]),
+    np.float32(settings["sources"]['s_ann']),
+    np.float32(settings["sources"]['z_ann']),
+    np.float32(settings["sources"]['r_inner']),
+    np.float32(settings["sources"]['r_outer']),
+    np.float32(settings["sources"]['z_exp']),
+    np.float32(settings["sources"]['s_exp']),
+    np.float32(settings["sources"]['k_exp']),
     block=threadsperblock,
     grid=blockspergrid
 )
@@ -250,6 +261,7 @@ terma(
     fluence_grid_gpu,
     d_eff_grid_gpu,
     num_voxels_gpu,
+    np.int32(len(energies)),
     energies_gpu,
     energy_weights_gpu,
     mu_w_gpu,
@@ -261,6 +273,36 @@ terma(
 )
 cuda.memcpy_dtoh(terma_grid, terma_grid_gpu)
 
+# tmp = terma_grid[50, :, 50]
+# terma_grid = np.zeros_like(density_grid, dtype=np.float32)
+# terma_grid[50, :, 50] = tmp  # Test TERMA
+terma_grid = np.zeros_like(density_grid, dtype=np.float32)
+terma_grid[50, 50, 50] = 1.0  # Test TERMA
+
+# %%
+if settings["calculation"]["mask_enable"]:
+    print("Calculating mask...")
+    cuda.memcpy_htod(mask_grid_gpu, mask_grid)
+    cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
+    cuda.memcpy_htod(corner_gpu, grid.corner)
+    cuda.memcpy_htod(resolution_gpu, grid.resolution)
+    cuda.memcpy_htod(source_position_gpu, source.position)
+    mask(
+        mask_grid_gpu,
+        terma_grid_gpu,
+        num_voxels_gpu,
+        corner_gpu,
+        resolution_gpu,
+        np.float32(settings["calculation"]["mask_max_distance"]),
+        np.float32(terma_grid.max() * settings["calculation"]["mask_terma_threshold"]),
+        block=threadsperblock,
+        grid=blockspergrid
+    )
+    cuda.memcpy_dtoh(mask_grid, mask_grid_gpu)
+else:
+    print("Skipping mask calculation.")
+    mask_grid = np.ones(density_grid.shape, dtype=np.float32)
+
 # %%
 print("Calculating dose...")
 cuda.memcpy_htod(dose_grid_gpu, dose_grid)
@@ -269,12 +311,16 @@ cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
 cuda.memcpy_htod(corner_gpu, grid.corner)
 cuda.memcpy_htod(density_grid_gpu, density_grid)
 cuda.memcpy_htod(terma_grid_gpu, terma_grid)
+cuda.memcpy_htod(mask_grid_gpu, mask_grid)
 cuda.memcpy_htod(kernel_thetas_gpu, kernel_thetas)
 cuda.memcpy_htod(kernel_phis_c_gpu, kernel_phis_c)
 cuda.memcpy_htod(kernel_gpu, kernel)
 cuda.memcpy_htod(source_v_x_gpu, source.v_x)
 cuda.memcpy_htod(source_v_y_gpu, source.v_y)
 cuda.memcpy_htod(source_v_z_gpu, source.v_z)
+# start_evt = cuda.Event()
+# end_evt = cuda.Event()
+# start_evt.record()
 dose(
     dose_grid_gpu,
     resolution_gpu,
@@ -282,17 +328,82 @@ dose(
     corner_gpu,
     density_grid_gpu,
     terma_grid_gpu,
+    mask_grid_gpu,
     kernel_thetas_gpu,
     kernel_phis_c_gpu,
     kernel_gpu,
     source_v_x_gpu,
     source_v_y_gpu,
     source_v_z_gpu,
-    np.int32(800),     # n depth bins
-    np.float32(0.025),   # float32 (e.g. 0.025)
-    np.float32(20),      # float32 (eg n_depth_bins * depth_res)
-    np.float32(0.025),    # float32 (ray march step, e.g. 0.025)
+    np.int32(1192),     # n depth bins
+    np.float32(0.05),   # float32 (e.g. 0.025)
+    np.float32(59.6),      # float32 (eg n_depth_bins * depth_res)
+    np.float32(0.05),    # float32 (ray march step, e.g. 0.025)
     block=threadsperblock,
     grid=blockspergrid
 )
+# end_evt.record()
+# end_evt.synchronize()
+# elapsed_time_ms = start_evt.time_till(end_evt)
+# print(f"GPU operation took {elapsed_time_ms:.3f} ms")
 cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
+
+# # %%
+# print("Calculating active dose...")
+# cuda.memcpy_htod(dose_grid_gpu, dose_grid)
+# cuda.memcpy_htod(resolution_gpu, grid.resolution)
+# cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
+# cuda.memcpy_htod(corner_gpu, grid.corner)
+# cuda.memcpy_htod(density_grid_gpu, density_grid)
+# cuda.memcpy_htod(terma_grid_gpu, terma_grid)
+# cuda.memcpy_htod(mask_grid_gpu, mask_grid)
+# cuda.memcpy_htod(kernel_thetas_gpu, kernel_thetas)
+# cuda.memcpy_htod(kernel_phis_c_gpu, kernel_phis_c)
+# cuda.memcpy_htod(kernel_gpu, kernel)
+# cuda.memcpy_htod(source_v_x_gpu, source.v_x)
+# cuda.memcpy_htod(source_v_y_gpu, source.v_y)
+# cuda.memcpy_htod(source_v_z_gpu, source.v_z)
+# start_evt = cuda.Event()
+# end_evt = cuda.Event()
+# start_evt.record()
+# active_dose(
+#     dose_grid_gpu,
+#     resolution_gpu,
+#     num_voxels_gpu,
+#     corner_gpu,
+#     density_grid_gpu,
+#     terma_grid_gpu,
+#     mask_grid_gpu,
+#     kernel_thetas_gpu,
+#     kernel_phis_c_gpu,
+#     kernel_gpu,
+#     source_v_x_gpu,
+#     source_v_y_gpu,
+#     source_v_z_gpu,
+#     np.int32(800),     # n depth bins
+#     np.float32(0.025),   # float32 (e.g. 0.025)
+#     np.float32(20),      # float32 (eg n_depth_bins * depth_res)
+#     np.float32(0.025),    # float32 (ray march step, e.g. 0.025)
+#     np.int32(settings["calculation"]["active_dose_interp_skip"]),
+#     np.float32(settings["calculation"]["active_dose_interp_terma_threshold"] * terma_grid.max()),
+#     np.float32(settings["calculation"]["active_dose_interp_dose_threshold"]),
+#     block=threadsperblock,
+#     grid=blockspergrid
+# )
+# end_evt.record()
+# end_evt.synchronize()
+# elapsed_time_ms = start_evt.time_till(end_evt)
+# print(f"GPU operation took {elapsed_time_ms:.3f} ms")
+# cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
+
+
+
+
+# %%
+import pandas as pd
+file_path = '6MV Beam Data.xlsx'
+df = pd.read_excel(file_path, sheet_name='Open Field Depth Dose')
+xs = np.linspace(0, 40, 201) + 0.1
+plt.plot(xs, dose_grid[100,:,100]/dose_grid[100,:,100].max() * 100)
+plt.plot(df.iloc[5:, 0], df.iloc[5:, 5])
+# %%

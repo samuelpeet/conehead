@@ -39,14 +39,14 @@ class KernelMono:
             if start == 0 or end == 0:
                 raise ImportError("Kernel info could not be found in .egslst file.")
 
-            data_raw = np.array(
+            self.data_raw = np.array(
                 [l.split()[:3] for l in lines[start:end]], dtype=np.float32
             )
-            self.angles = np.unique(data_raw[:, 0])
-            self.radii = np.unique(data_raw[:, 1])
+            self.angles = np.unique(self.data_raw[:, 0])
+            self.radii = np.unique(self.data_raw[:, 1])
             n_cones = len(self.angles)
             n_depths = len(self.radii)
-            self.kernel = data_raw[:, 2].reshape((n_cones, n_depths), copy=True)
+            self.kernel = self.data_raw[:, 2].reshape((n_cones, n_depths), copy=True)
 
             r_edges = np.insert(self.radii, 0, 0)
             self.radii_centres = 0.5 * (r_edges[1:] + r_edges[:-1]) 
@@ -54,16 +54,21 @@ class KernelMono:
             self.angles_centres = 0.5 * (angles_edges[1:] + angles_edges[:-1]) 
 
             for i in range(self.kernel.shape[0]):
-                self.kernel[i, :] = self.kernel[i, :] / self.radii_centres
+                # self.kernel[i, :] = self.kernel[i, :] / self.radii_centres
+                dR = (r_edges[1:]**3 - r_edges[:-1]**3) / 3
+                dPhi = (np.cos(np.radians(angles_edges[:-1])) - np.cos(np.radians(angles_edges[1:]))) * 2 * np.pi
+                # print(dR.shape, dPhi.shape, self.radii_centres.shape, self.kernel[i, :].shape)
+                self.kernel[i, :] = self.kernel[i, :] / (dR * dPhi[i]) * self.radii_centres * self.radii_centres
+                # self.kernel[i, :] = self.kernel[i, :] * self.radii_centres * self.radii_centres
 
             self.kernel = self.kernel / self.kernel.sum()
            
-            kernel_interp = np.zeros((n_cones, 800))
-            for i in range(self.kernel.shape[0]):
-                kernel_interp[i, :] = np.interp(  # Resample to 0.25 mm
-                    np.linspace(0.025, 20.0, 800),
-                    self.radii_centres,
-                    self.kernel[i, :]
-                )
-            self.kernel = kernel_interp
-            self.kernel = self.kernel / self.kernel.sum()
+            # kernel_interp = np.zeros((n_cones, 2400))
+            # for i in range(self.kernel.shape[0]):
+            #     kernel_interp[i, :] = np.interp(  # Resample to 0.25 mm
+            #         np.linspace(0.025, 60.0, 2400),
+            #         self.radii_centres,
+            #         self.kernel[i, :]
+            #     )
+            # self.kernel = kernel_interp
+            # self.kernel = self.kernel / self.kernel.sum()
