@@ -61,7 +61,7 @@ PRINT OUT EDK FILE= yes # produce energy deposition file
 ##########################
 :start Monte Carlo inputs:
 
-NUMBER OF HISTORIES= 10000000 #
+NUMBER OF HISTORIES= 100000000 #
 
 INITIAL RANDOM NO. SEEDS= 1, 66
 
@@ -98,14 +98,16 @@ DOPPLER BROADENING= On # On or Off
                                                 # ncones
                                                 # DANG1, DANG2,...,DANGncones
 
-# NUMBER OF SPHERES = 36  # number of spheres (individual or by group)
+NUMBER OF SPHERES = 1192  # number of spheres (individual or by group)
                          # For individual inputs as below, number of spheres can be omitted
 
-RADII=  0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2,
-        0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.7, 0.8,
-        0.9, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.5,
-        3.0, 3.5, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0,
-        10.0, 12.0, 15.0, 20.0
+#RADII=  0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2,
+#        0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.7, 0.8,
+#        0.9, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.5,
+#        3.0, 3.5, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0,
+#        10.0, 12.0, 15.0, 20.0, 30.0, 40.0 , 50.0, 60.0
+
+RADII=  0.05
                                                        
                                                        
 	                                                
@@ -134,7 +136,7 @@ MEDNUM= 1                       # define what medium goes where
                                 #be selected with this in mind.
 
 START REGION= 2                 #This puts water everywhere
-STOP REGION=  433
+STOP REGION=  14305
 
 :stop geometrical inputs:
 #########################

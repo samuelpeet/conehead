@@ -1,0 +1,47 @@
+@g0 type xy 
+@    title "Energy deposition kernel for 1.0 MeV photons"
+@    subtitle "Dose vs. angle on Sat Oct 11 18:59:50 2025"
+@    legend on
+@    legend box linestyle 0
+@    legend x1 0.6
+@    legend y1 0.75
+@    view xmin 0.250000
+@    xaxis  label "angle \\8q\\0 /deg"
+@    timestamp on
+@    yaxis  label "dose per incident particle / Gy"
+@    s0 on
+@    legend string  0 "r=0.03 cm"
+@TYPE xydy
+@    s0 errorbar length 0.000000
+@    s0 symbol color 1
+     2.5000E+00     1.6014E-06     2.2625E-09
+     7.5000E+00     1.3966E-06     1.2145E-09
+     1.2500E+01     1.1168E-06     8.1372E-10
+     1.7500E+01     8.7450E-07     6.0024E-10
+     2.5000E+01     6.3609E-07     3.3917E-10
+     3.5000E+01     4.6296E-07     2.5882E-10
+     4.7500E+01     3.1390E-07     1.7908E-10
+     6.2500E+01     1.7911E-07     1.3243E-10
+     8.0000E+01     8.5663E-08     7.8984E-11
+     1.0500E+02     2.9679E-08     4.0970E-11
+     1.3500E+02     8.8285E-09     2.5639E-11
+     1.6500E+02     4.0729E-09     2.8005E-11
+&
+@    s1 on
+@    legend string  1 "r=0.05 cm"
+@TYPE xydy
+@    s1 errorbar length 0.000000
+@    s1 symbol color 2
+     2.5000E+00     2.0956E-07     3.6029E-10
+     7.5000E+00     1.9190E-07     2.0010E-10
+     1.2500E+01     1.6494E-07     1.4146E-10
+     1.7500E+01     1.3589E-07     1.0845E-10
+     2.5000E+01     9.7417E-08     6.1929E-11
+     3.5000E+01     6.2937E-08     4.5472E-11
+     4.7500E+01     3.6896E-08     2.8822E-11
+     6.2500E+01     1.9638E-08     2.0636E-11
+     8.0000E+01     9.2900E-09     1.2755E-11
+     1.0500E+02     3.0921E-09     6.5577E-12
+     1.3500E+02     8.1659E-10     3.9170E-12
+     1.6500E+02     3.5541E-10     4.2373E-12
+&

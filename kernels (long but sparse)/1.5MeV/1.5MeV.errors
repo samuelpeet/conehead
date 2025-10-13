@@ -1,0 +1,32 @@
+  If you are not trying to reset transport parameters, 
+  ignore all the output until the message 
+  ******************** end input transport parameter *********************** 
+
+ ***************ERROR***************
+ >>scale L EII cross-sections<< NOT FOUND
+ END OF DELIMETER: MC TRANSPORT PARAMETER
+ ***************ERROR***************
+ >>Electric Field<< NOT FOUND
+ END OF DELIMETER: MC TRANSPORT PARAMETER
+ ***************ERROR***************
+ >>Magnetic Field<< NOT FOUND
+ END OF DELIMETER: MC TRANSPORT PARAMETER
+ ***************ERROR***************
+ >>EM ESTEPE<< NOT FOUND
+ END OF DELIMETER: MC TRANSPORT PARAMETER
+ ***************ERROR***************
+ >>Photonuclear attenuation<< NOT FOUND
+ END OF DELIMETER: MC TRANSPORT PARAMETER
+ ***************ERROR***************
+ >>Photonuclear cross sections<< NOT FOUND
+ END OF DELIMETER: MC TRANSPORT PARAMETER
+
+  ******************** end input transport parameter *********************** 
+
+  
+  
+  *************************************************
+  ********* SUCCESSFUL INPUT ACCOMPLISHED *********
+  *************************************************
+  
+  
