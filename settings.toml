@@ -8,12 +8,31 @@ z_exp = 12.5
 s_exp = 0.00 #8.289e-3
 k_exp = 0.4816
 
+[sources_new]
+pri_s = 0.9
+pri_x = 0.101
+pri_y = 0.101
+pri_z = 0.5
+sec_s = 0.1
+sec_x = 2.765
+sec_y = 2.765
+sec_z = 5.0
+
+[collimators]
+x_jaw_trans = 0.0075
+x_jaw_z = 44.5
+y_jaw_trans = 0.0075
+y_jaw_z = 36.0
+mlc_trans = 0.01575
+mlc_z = 53.8
+mlc_tg = 0.044
+
 [calculation]
 fluence_resampling = 3
 mask_enable = true
 mask_max_distance = 5  # cm
 mask_terma_threshold = 0.005
-active_dose_interp_enable = true
+active_dose_interp_enable = false
 active_dose_interp_skip = 4
 active_dose_interp_terma_threshold = 0.002
 active_dose_interp_dose_threshold = 0.05
