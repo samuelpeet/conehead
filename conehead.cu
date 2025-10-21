@@ -70,6 +70,30 @@ __device__ float block_transmission(float *position, float *block_values)
     return transmission;
 }
 
+// Clearly a target for a 2D texture in future (TODO)
+__device__ float fluence_map_lookup(float *position, float *fluence_map)
+{
+    float pos_x = floor(position[0] * 10); // Convert to mm
+    float pos_y = floor(position[1] * 10); // Convert to mm
+
+    pos_x = pos_x + 280;
+    pos_y = pos_y + 280;
+
+    int ix = (int)(pos_x) - 1;
+    int iy = (int)(pos_y) - 1;
+
+    // Handle position lying outside the defined blocking area
+    if (ix < 0 || ix > 559 || iy < 0 || iy > 559)
+    {
+        return 0;
+    }
+
+    // Assuming fluence_map is a 1D array representing a 560*560 grid
+    int width = 560;
+    float fluence = fluence_map[ix + iy * width];
+    return fluence;
+}
+
 __global__ void hit_test(float *blocked_grid, int *num_voxels, float *corner, float *resolution, float *source_position, float *source_v_x, float *source_v_y, float *source_v_z, float *block_values, int samples)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -249,6 +273,47 @@ __global__ void d_eff(float *d_eff, int *num_voxels, float *corner, float *resol
     }
 }
 
+
+
+// __global__ void fluence_plane(float *num_bixels, float *corner, float *resolution, float *source_position, float *source_v_y, float pri_s, float pri_x, float pri_y, float pri_z, float sec_s, float sec_x, float sec_y, float sec_z)
+// {
+//     int x = blockIdx.x * blockDim.x + threadIdx.x;
+//     int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+//     if (x < num_bixels[0] && y < num_bixels[1])
+//     {
+//         // Get bixel position
+//         float position[3];
+//         position[0] = corner[0] + resolution[0] * (x + 0.5);
+//         position[1] = corner[1] + resolution[1] * (y + 0.5);
+//         position[2] = 0.0;
+
+//         // Determine distance/direction to source
+//         float distance[3];
+//         distance[0] = source_position[0] - position[0];
+//         distance[1] = source_position[1] - position[1];
+//         distance[2] = source_position[2] - position[2];
+//         float mag = sqrt(
+//             distance[0] * distance[0] +
+//             distance[1] * distance[1] +
+//             distance[2] * distance[2]
+//         );
+
+//         line_plane_collision(pos_plane, source_position, ray_direction, source_v_y, 1e-6);
+
+
+//         // Point source
+//         float fluence_point = pri_s * pow(source_position[1] / mag, 2);
+
+//         int idx = x + y * num_bixels[0];
+//         num_bixels[idx] = fluence_point;
+//     }    
+// }
+
+
+
+
+
 // Could use textures at this point for both oad_grid and blocked_grid (TODO)               
 __global__ void fluence(float *fluence_grid, float *oad_grid, float *blocked_grid, int *num_voxels, float *corner, float *resolution, float *source_position, float *beam_profile_correction_fs_interp, float beam_profile_correction_dx, float source_sad, float sPri, float sAnn, float zAnn, float rInner, float rOuter, float zExp, float sExp, float kExp)
 {
@@ -304,6 +369,69 @@ __global__ void fluence(float *fluence_grid, float *oad_grid, float *blocked_gri
         float bpc = beam_profile_correction_fs_interp[ix];
         fluence_grid[idx] = (fluence_point * bpc + fluence_ann + fluence_exp) * blocked_grid[idx];
         // fluence_grid[idx] = fluence_point * blocked_grid[idx];
+    }
+}
+
+
+__global__ void fluence_new(float *fluence_grid, float *fluence_map, int *num_voxels, float *corner, float *resolution, float *source_position, float *source_v_x, float *source_v_y, float *source_v_z, float source_sad, float pri_s, float pri_x, float pri_y, float pri_z, float sec_s, float sec_x, float sec_y, float sec_z, int samples)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int z = blockIdx.z * blockDim.z + threadIdx.z;
+
+    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
+    {
+        float position[3];
+        position[0] = corner[0] + resolution[0] * x;
+        position[1] = corner[1] + resolution[1] * y;
+        position[2] = corner[2] + resolution[2] * z;
+
+        float offset[3];
+        offset[0] = resolution[0] / samples;
+        offset[1] = resolution[1] / samples;
+        offset[2] = resolution[2] / samples;
+
+        float fluence = 0;
+        for (int ix = 0; ix < samples; ix++)
+        {
+            for (int iy = 0; iy < samples; iy++)
+            {
+                for (int iz = 0; iz < samples; iz++)
+                {
+
+                    // Position of sample
+                    float pos_sample[3];
+                    pos_sample[0] = position[0] + offset[0]/2 + offset[0] * ix;
+                    pos_sample[1] = position[1] + offset[1]/2 + offset[1] * iy;
+                    pos_sample[2] = position[2] + offset[2]/2 + offset[2] * iz;
+
+                    // Determine position on fluence map plane in global coords
+                    float ray_direction[3];
+                    ray_direction[0] = source_position[0] - pos_sample[0];
+                    ray_direction[1] = source_position[1] - pos_sample[1];
+                    ray_direction[2] = source_position[2] - pos_sample[2];
+
+                    float pos_plane[3];
+                    line_plane_collision(pos_plane, source_position, ray_direction, source_v_y, 1e-6);
+                    // printf("pos_plane: %f, %f, %f\n", pos_plane[0], pos_plane[1], pos_plane[2]);
+
+                    // Convert to source coords
+                    float pos_fluence_map[3];
+                    pos_fluence_map[0] = dot(source_v_x, pos_plane);
+                    pos_fluence_map[1] = dot(source_v_y, pos_plane);
+                    pos_fluence_map[2] = dot(source_v_z, pos_plane);
+                    // printf("pos_fluence_map: %f, %f, %f\n", pos_fluence_map[0], pos_fluence_map[1], pos_fluence_map[2]);
+
+                    // Reduce to 2D
+                    float pos_fluence_map_2d[2];
+                    pos_fluence_map_2d[0] = pos_fluence_map[0];
+                    pos_fluence_map_2d[1] = pos_fluence_map[2];
+                    fluence = fluence + fluence_map_lookup(pos_fluence_map_2d, fluence_map) / (samples*samples*samples);
+                    // printf("x:%f, y:%f, fluence sample: %f\n", pos_fluence_map_2d[0], pos_fluence_map_2d[1], fluence_map_lookup(pos_fluence_map_2d, fluence_map));
+                }
+            }
+        }
+        fluence_grid[x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1]] = fluence;
     }
 }
 
@@ -490,6 +618,14 @@ __global__ void dose(float *dose_grid, float *resolution, int *num_voxels, float
             direction[0] = c_t_arr[it] * s_p_arr[ip];
             direction[1] = c_p_arr[ip];
             direction[2] = s_t_arr[it] * s_p_arr[ip];
+            float mag = sqrt(
+                direction[0] * direction[0] +
+                direction[1] * direction[1] +
+                direction[2] * direction[2]
+            );
+            direction[0] /= mag;
+            direction[1] /= mag;
+            direction[2] /= mag;
 
             // // Rotate kernel-local direction into world using the tilted basis {x', y'=axis, z'}
             // direction_w[0] = direction_k[0] * xprime[0] + direction_k[1] * axis[0] + direction_k[2] * zprime[0];
@@ -681,8 +817,8 @@ __global__ void dose_banked(
                 if (lut_ix < 0) lut_ix = 0;
                 if (lut_ix >= off_axis_table_len) lut_ix = off_axis_table_len - 1;
                 float oas = off_axis_softening_fs_interp[lut_ix];
-                // Assuming oas ~ -T_offaxis (cm water eq.), hence T_eff = d_eff + oas
-                float T_eff = dEff + oas;
+                // Assuming oas ~ -T_offaxis (cm water eq.), hence T_eff = d_eff - oas
+                float T_eff = dEff - oas;
 
                 // Map T_eff to nearest bank index (no interpolation)
                 float u = (T_eff - T_min) / T_step;

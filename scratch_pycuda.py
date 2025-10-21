@@ -7,6 +7,8 @@ import pycuda.driver as cuda
 import pycuda.autoinit
 import shutil
 from scipy.optimize import minimize
+from scipy.ndimage import gaussian_filter
+from scipy.interpolate import make_interp_spline, RegularGridInterpolator
 import pandas as pd
 from pycuda.compiler import SourceModule
 from conehead.kernel import KernelMono
@@ -22,7 +24,7 @@ df = pd.read_excel(file_path, sheet_name='Open Field Depth Dose')
 # def optimise_me(x):
 
 ## %%
-settings = toml.load("settings.toml")
+settings = toml.load("settings_6FFF.toml")
 kernels = [
     KernelMono("kernels/0.5MeV/0.5MeV.egslst"),
     KernelMono("kernels/1.0MeV/1.0MeV.egslst"),
@@ -86,15 +88,15 @@ kernel_bank = kernel_bank / kernel_bank.reshape(len(kernel_bank_T_cm), -1).sum(a
 # Optional: quick sanity print (commented to keep output clean)
 # print(f"Kernel bank built: T bins = {len(kernel_bank_T_cm)}, shape per kernel = ({nPhi}, {nDepth})")
 
-beam_profile_correction_oads = np.array(settings["beam_profile_correction"]["oads"], dtype=np.float32)
-beam_profile_correction_fs = np.array(settings["beam_profile_correction"]["factors"], dtype=np.float32)
-beam_profile_correction_oads_interp = np.linspace(beam_profile_correction_oads[0], beam_profile_correction_oads[-1], 1001, dtype=np.float32)
-beam_profile_correction_fs_interp = np.interp(  # Resample to high res for indexing into later
-    beam_profile_correction_oads_interp,
-    beam_profile_correction_oads,
-    beam_profile_correction_fs,
-).astype(np.float32)
-beam_profile_correction_dx = beam_profile_correction_oads_interp[1] - beam_profile_correction_oads_interp[0]
+# beam_profile_correction_oads = np.array(settings["beam_profile_correction"]["oads"], dtype=np.float32)
+# beam_profile_correction_fs = np.array(settings["beam_profile_correction"]["factors"], dtype=np.float32)
+# beam_profile_correction_oads_interp = np.linspace(beam_profile_correction_oads[0], beam_profile_correction_oads[-1], 1001, dtype=np.float32)
+# beam_profile_correction_fs_interp = np.interp(  # Resample to high res for indexing into later
+#     beam_profile_correction_oads_interp,
+#     beam_profile_correction_oads,
+#     beam_profile_correction_fs,
+# ).astype(np.float32)
+# beam_profile_correction_dx = beam_profile_correction_oads_interp[1] - beam_profile_correction_oads_interp[0]
 
 off_axis_softening_oads = np.array(settings["off_axis_softening"]["oads"], dtype=np.float32)
 off_axis_softening_fs = np.array(settings["off_axis_softening"]["factors"], dtype=np.float32)
@@ -110,13 +112,52 @@ phantom = SimplePhantom()
 source = Source()
 grid = DoseGrid(phantom.num_voxels, phantom.corner, phantom.resolution)
 block = Block()
-block.set_square(np.float32(20)) 
+block.set_square(np.float32(10)) 
 
 energies = np.array([np.float32(x) for x in settings["energy_spectrum"]["energies"]], dtype=np.float32)
 energy_weights = np.array([np.float32(x) for x in settings["energy_spectrum"]["weights"]], dtype=np.float32)
 energy_weights = energy_weights / energy_weights.sum()  # normalise
 mu_w = mu_water(energies)
 
+
+
+# Define the original (coarse) grid and data
+# x_orig and y_orig represent the coordinates of the original grid points
+x_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
+y_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
+X_orig, Y_orig = np.meshgrid(x_orig, y_orig)
+
+# Define the target (finer) grid
+x_target = np.linspace(-28.0, 28.0, 560) # 560 points from -28 to 28
+y_target = np.linspace(-28.0, 28.0, 560) # 560 points from -28 to 28
+X_target, Y_target = np.meshgrid(x_target, y_target)
+
+interpolator = RegularGridInterpolator((x_orig, y_orig), block.block_values, method='linear', bounds_error=False, fill_value=0)
+points_target = np.array([X_target.ravel(), Y_target.ravel()]).T
+block_interpolated = interpolator(points_target)
+block_interpolated_2d = block_interpolated.reshape(X_target.shape)
+
+# Primary source blur
+pixel_pitch_cm = 0.1  # cm
+sigma_pix_x = settings["sources_new"]["pri_x"] / pixel_pitch_cm
+sigma_pix_y = settings["sources_new"]["pri_y"] / pixel_pitch_cm
+pri_fluence = gaussian_filter(block_interpolated_2d, sigma=(sigma_pix_x, sigma_pix_y), mode='nearest')
+
+# Secondary source blur
+sigma_pix_x = settings["sources_new"]["sec_x"] / pixel_pitch_cm
+sigma_pix_y = settings["sources_new"]["sec_y"] / pixel_pitch_cm
+sec_fluence = gaussian_filter(block_interpolated_2d, sigma=(sigma_pix_x, sigma_pix_y), mode='nearest')
+
+# Beam profile correction filter
+bpc_interp = make_interp_spline(settings["beam_profile_correction"]["oads"], settings["beam_profile_correction"]["factors"], k=1)
+x = np.arange(-28, 28, 0.1, dtype=np.float32)
+y = np.arange(-28, 28, 0.1, dtype=np.float32)
+X, Y = np.meshgrid(x, y)
+r = np.sqrt(X**2 + Y**2)
+bpc = bpc_interp(r)
+
+fluence_map = settings["sources_new"]["pri_s"] * pri_fluence * bpc + settings["sources_new"]["sec_s"] * sec_fluence
+fluence_map = fluence_map.astype(np.float32)
 
 ## %%
 # Create python data arrays
@@ -132,10 +173,12 @@ dose_grid = np.zeros(density_grid.shape, dtype=np.float32)
 
 # Allocate GPU memory
 density_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
+
 blocked_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 oad_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 d_geo_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 d_eff_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
+fluence_map_gpu = cuda.mem_alloc(fluence_map.nbytes)
 fluence_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 terma_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 mask_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
@@ -148,7 +191,6 @@ source_v_x_gpu = cuda.mem_alloc(source.v_x.nbytes)
 source_v_y_gpu = cuda.mem_alloc(source.v_y.nbytes)
 source_v_z_gpu = cuda.mem_alloc(source.v_z.nbytes)
 block_values_gpu = cuda.mem_alloc(block.block_values.nbytes)
-beam_profile_correction_fs_interp_gpu = cuda.mem_alloc(beam_profile_correction_fs_interp.nbytes)
 energies_gpu = cuda.mem_alloc(energies.nbytes)
 energy_weights_gpu = cuda.mem_alloc(energy_weights.nbytes)
 mu_w_gpu = cuda.mem_alloc(mu_w.nbytes)
@@ -170,6 +212,7 @@ oad = mod.get_function("oad")
 d_geo = mod.get_function("d_geo")
 d_eff = mod.get_function("d_eff")
 fluence = mod.get_function("fluence")
+fluence_new = mod.get_function("fluence_new")
 terma = mod.get_function("terma")
 mask = mod.get_function("mask")
 dose = mod.get_function("dose")
@@ -183,32 +226,32 @@ blockspergrid_y = math.ceil(density_grid.shape[1] / threadsperblock[1])
 blockspergrid_z = math.ceil(density_grid.shape[2] / threadsperblock[2])
 blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
 
-## %%
-# print("Performing hit-testing of dose grid voxels...")
-cuda.memcpy_htod(blocked_grid_gpu, blocked_grid)
-cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
-cuda.memcpy_htod(corner_gpu, grid.corner)
-cuda.memcpy_htod(resolution_gpu, grid.resolution)
-cuda.memcpy_htod(source_position_gpu, source.position)
-cuda.memcpy_htod(source_v_x_gpu, source.v_x)
-cuda.memcpy_htod(source_v_y_gpu, source.v_y)
-cuda.memcpy_htod(source_v_z_gpu, source.v_z)
-cuda.memcpy_htod(block_values_gpu, block.block_values)
-hit_test(
-    blocked_grid_gpu,
-    num_voxels_gpu,
-    corner_gpu,
-    resolution_gpu,
-    source_position_gpu,
-    source_v_x_gpu,
-    source_v_y_gpu,
-    source_v_z_gpu,
-    block_values_gpu,
-    np.int32(settings["calculation"]["fluence_resampling"]),
-    block=threadsperblock,
-    grid=blockspergrid
-)
-cuda.memcpy_dtoh(blocked_grid, blocked_grid_gpu)
+# ## %%
+# # print("Performing hit-testing of dose grid voxels...")
+# cuda.memcpy_htod(blocked_grid_gpu, blocked_grid)
+# cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
+# cuda.memcpy_htod(corner_gpu, grid.corner)
+# cuda.memcpy_htod(resolution_gpu, grid.resolution)
+# cuda.memcpy_htod(source_position_gpu, source.position)
+# cuda.memcpy_htod(source_v_x_gpu, source.v_x)
+# cuda.memcpy_htod(source_v_y_gpu, source.v_y)
+# cuda.memcpy_htod(source_v_z_gpu, source.v_z)
+# cuda.memcpy_htod(block_values_gpu, block.block_values)
+# hit_test(
+#     blocked_grid_gpu,
+#     num_voxels_gpu,
+#     corner_gpu,
+#     resolution_gpu,
+#     source_position_gpu,
+#     source_v_x_gpu,
+#     source_v_y_gpu,
+#     source_v_z_gpu,
+#     block_values_gpu,
+#     np.int32(settings["calculation"]["fluence_resampling"]),
+#     block=threadsperblock,
+#     grid=blockspergrid
+# )
+# cuda.memcpy_dtoh(blocked_grid, blocked_grid_gpu)
 
 ## %%
 # print("Calculating off-axis distances")
@@ -277,36 +320,72 @@ cuda.memcpy_dtoh(d_eff_grid, d_eff_grid_gpu)
 ## %%
 # print("Calculating photon fluence...")
 cuda.memcpy_htod(fluence_grid_gpu, fluence_grid)
-cuda.memcpy_htod(oad_grid_gpu, oad_grid)
-cuda.memcpy_htod(blocked_grid_gpu, blocked_grid)
+cuda.memcpy_htod(fluence_map_gpu, fluence_map)
 cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
 cuda.memcpy_htod(corner_gpu, grid.corner)
 cuda.memcpy_htod(resolution_gpu, grid.resolution)
 cuda.memcpy_htod(source_position_gpu, source.position)
-cuda.memcpy_htod(beam_profile_correction_fs_interp_gpu, beam_profile_correction_fs_interp)
-fluence(
+cuda.memcpy_htod(source_v_x_gpu, source.v_x)
+cuda.memcpy_htod(source_v_y_gpu, source.v_y)
+cuda.memcpy_htod(source_v_z_gpu, source.v_z)
+fluence_new(
     fluence_grid_gpu,
-    oad_grid_gpu,
-    blocked_grid_gpu,
+    fluence_map_gpu,
     num_voxels_gpu,
     corner_gpu,
     resolution_gpu,
     source_position_gpu,
-    beam_profile_correction_fs_interp_gpu,
-    np.float32(beam_profile_correction_dx),
+    source_v_x_gpu,
+    source_v_y_gpu,
+    source_v_z_gpu,
     np.float32(source.sad),
-    np.float32(settings["sources"]["s_pri"]),
-    np.float32(settings["sources"]['s_ann']),
-    np.float32(settings["sources"]['z_ann']),
-    np.float32(settings["sources"]['r_inner']),
-    np.float32(settings["sources"]['r_outer']),
-    np.float32(settings["sources"]['z_exp']),
-    np.float32(settings["sources"]['s_exp']),
-    np.float32(settings["sources"]['k_exp']),
+    np.float32(settings["sources_new"]["pri_s"]),
+    np.float32(settings["sources_new"]['pri_x']),
+    np.float32(settings["sources_new"]['pri_y']),
+    np.float32(settings["sources_new"]['pri_z']),
+    np.float32(settings["sources_new"]['sec_s']),
+    np.float32(settings["sources_new"]['sec_x']),
+    np.float32(settings["sources_new"]['sec_y']),
+    np.float32(settings["sources_new"]['sec_z']),
+    np.int32(settings["calculation"]["fluence_resampling"]),
     block=threadsperblock,
     grid=blockspergrid
 )
 cuda.memcpy_dtoh(fluence_grid, fluence_grid_gpu)
+
+# ## %%
+# # print("Calculating photon fluence...")
+# cuda.memcpy_htod(fluence_grid_gpu, fluence_grid)
+# cuda.memcpy_htod(oad_grid_gpu, oad_grid)
+# cuda.memcpy_htod(blocked_grid_gpu, blocked_grid)
+# cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
+# cuda.memcpy_htod(corner_gpu, grid.corner)
+# cuda.memcpy_htod(resolution_gpu, grid.resolution)
+# cuda.memcpy_htod(source_position_gpu, source.position)
+# cuda.memcpy_htod(beam_profile_correction_fs_interp_gpu, beam_profile_correction_fs_interp)
+# fluence(
+#     fluence_grid_gpu,
+#     oad_grid_gpu,
+#     blocked_grid_gpu,
+#     num_voxels_gpu,
+#     corner_gpu,
+#     resolution_gpu,
+#     source_position_gpu,
+#     beam_profile_correction_fs_interp_gpu,
+#     np.float32(beam_profile_correction_dx),
+#     np.float32(source.sad),
+#     np.float32(settings["sources_new"]["pri_s"]),
+#     np.float32(settings["sources_new"]['pri_x']),
+#     np.float32(settings["sources_new"]['pri_y']),
+#     np.float32(settings["sources_new"]['pri_z']),
+#     np.float32(settings["sources_new"]['sec_s']),
+#     np.float32(settings["sources_new"]['sec_x']),
+#     np.float32(settings["sources_new"]['sec_y']),
+#     np.float32(settings["sources_new"]['sec_z']),
+#     block=threadsperblock,
+#     grid=blockspergrid
+# )
+# cuda.memcpy_dtoh(fluence_grid, fluence_grid_gpu)
 
 ## %%
 # print("Calculating TERMA...")
@@ -373,107 +452,42 @@ else:
     # print("Skipping mask calculation.")
     mask_grid = np.ones(density_grid.shape, dtype=np.float32)
 
-# ## %%
-# # print("Calculating dose...")
-# cuda.memcpy_htod(dose_grid_gpu, dose_grid)
-# cuda.memcpy_htod(resolution_gpu, grid.resolution)
-# cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
-# cuda.memcpy_htod(corner_gpu, grid.corner)
-# cuda.memcpy_htod(density_grid_gpu, density_grid)
-# cuda.memcpy_htod(d_geo_grid_gpu, d_geo_grid)
-# cuda.memcpy_htod(terma_grid_gpu, terma_grid)
-# cuda.memcpy_htod(mask_grid_gpu, mask_grid)
-# cuda.memcpy_htod(kernel_thetas_gpu, kernel_thetas)
-# cuda.memcpy_htod(kernel_phis_c_gpu, kernel_phis_c)
-# cuda.memcpy_htod(kernel_omegas_gpu, kernel_omegas)
-# cuda.memcpy_htod(kernel_gpu, kernel)
-# cuda.memcpy_htod(source_position_gpu, source.position)
-# cuda.memcpy_htod(source_v_x_gpu, source.v_x)
-# cuda.memcpy_htod(source_v_y_gpu, source.v_y)
-# cuda.memcpy_htod(source_v_z_gpu, source.v_z)
-# dose(
-#     dose_grid_gpu,
-#     resolution_gpu,
-#     num_voxels_gpu,
-#     corner_gpu,
-#     density_grid_gpu,
-#     d_geo_grid_gpu,
-#     terma_grid_gpu,
-#     mask_grid_gpu,
-#     kernel_thetas_gpu,
-#     kernel_phis_c_gpu,
-#     kernel_omegas_gpu,
-#     kernel_gpu,
-#     np.float32(source.sad),
-#     source_position_gpu,
-#     source_v_x_gpu,
-#     source_v_y_gpu,
-#     source_v_z_gpu,
-#     np.int32(1192),     # n depth bins
-#     np.float32(0.05),   # kernel depth resolution (cm)
-#     np.float32(59.6),   # max kernel depth (cm)
-#     np.float32(0.05),   # ray-march step (cm)
-#     block=threadsperblock,
-#     grid=blockspergrid
-# )
-# cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
-
-
-
-# print("Calculating dose (kernel bank)...")
+## %%
+# print("Calculating dose...")
 cuda.memcpy_htod(dose_grid_gpu, dose_grid)
 cuda.memcpy_htod(resolution_gpu, grid.resolution)
 cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
 cuda.memcpy_htod(corner_gpu, grid.corner)
 cuda.memcpy_htod(density_grid_gpu, density_grid)
 cuda.memcpy_htod(d_geo_grid_gpu, d_geo_grid)
-cuda.memcpy_htod(d_eff_grid_gpu, d_eff_grid)
 cuda.memcpy_htod(terma_grid_gpu, terma_grid)
 cuda.memcpy_htod(mask_grid_gpu, mask_grid)
-cuda.memcpy_htod(oad_grid_gpu, oad_grid)
 cuda.memcpy_htod(kernel_thetas_gpu, kernel_thetas)
 cuda.memcpy_htod(kernel_phis_c_gpu, kernel_phis_c)
 cuda.memcpy_htod(kernel_omegas_gpu, kernel_omegas)
-cuda.memcpy_htod(kernel_bank_gpu, kernel_bank)
+cuda.memcpy_htod(kernel_gpu, kernel)
 cuda.memcpy_htod(source_position_gpu, source.position)
 cuda.memcpy_htod(source_v_x_gpu, source.v_x)
 cuda.memcpy_htod(source_v_y_gpu, source.v_y)
 cuda.memcpy_htod(source_v_z_gpu, source.v_z)
-# Prepare bank/LUT parameters
-n_T_bins = np.int32(kernel_bank.shape[0])
-T_min = np.float32(kernel_bank_T_cm[0])
-T_step = np.float32(kernel_bank_T_cm[1] - kernel_bank_T_cm[0]) if kernel_bank_T_cm.shape[0] > 1 else np.float32(1.0)
-off_axis_table_len = np.int32(off_axis_softening_fs_interp.shape[0])
-dose_banked(
+dose(
     dose_grid_gpu,
     resolution_gpu,
     num_voxels_gpu,
     corner_gpu,
     density_grid_gpu,
     d_geo_grid_gpu,
-    d_eff_grid_gpu,
     terma_grid_gpu,
     mask_grid_gpu,
-    oad_grid_gpu,
     kernel_thetas_gpu,
     kernel_phis_c_gpu,
     kernel_omegas_gpu,
-    # kernel bank
-    kernel_bank_gpu,
-    n_T_bins,
-    T_min,
-    T_step,
-    # Off-axis softening LUT
-    off_axis_softening_fs_interp_gpu,
-    off_axis_table_len,
-    np.float32(off_axis_softening_dx),
-    # Geom/scales
+    kernel_gpu,
     np.float32(source.sad),
     source_position_gpu,
     source_v_x_gpu,
     source_v_y_gpu,
     source_v_z_gpu,
-    # Kernel sampling
     np.int32(1192),     # n depth bins
     np.float32(0.05),   # kernel depth resolution (cm)
     np.float32(59.6),   # max kernel depth (cm)
@@ -482,6 +496,71 @@ dose_banked(
     grid=blockspergrid
 )
 cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
+
+
+
+# # print("Calculating dose (kernel bank)...")
+# cuda.memcpy_htod(dose_grid_gpu, dose_grid)
+# cuda.memcpy_htod(resolution_gpu, grid.resolution)
+# cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
+# cuda.memcpy_htod(corner_gpu, grid.corner)
+# cuda.memcpy_htod(density_grid_gpu, density_grid)
+# cuda.memcpy_htod(d_geo_grid_gpu, d_geo_grid)
+# cuda.memcpy_htod(d_eff_grid_gpu, d_eff_grid)
+# cuda.memcpy_htod(terma_grid_gpu, terma_grid)
+# cuda.memcpy_htod(mask_grid_gpu, mask_grid)
+# cuda.memcpy_htod(oad_grid_gpu, oad_grid)
+# cuda.memcpy_htod(kernel_thetas_gpu, kernel_thetas)
+# cuda.memcpy_htod(kernel_phis_c_gpu, kernel_phis_c)
+# cuda.memcpy_htod(kernel_omegas_gpu, kernel_omegas)
+# cuda.memcpy_htod(kernel_bank_gpu, kernel_bank)
+# cuda.memcpy_htod(source_position_gpu, source.position)
+# cuda.memcpy_htod(source_v_x_gpu, source.v_x)
+# cuda.memcpy_htod(source_v_y_gpu, source.v_y)
+# cuda.memcpy_htod(source_v_z_gpu, source.v_z)
+# # Prepare bank/LUT parameters
+# n_T_bins = np.int32(kernel_bank.shape[0])
+# T_min = np.float32(kernel_bank_T_cm[0])
+# T_step = np.float32(kernel_bank_T_cm[1] - kernel_bank_T_cm[0]) if kernel_bank_T_cm.shape[0] > 1 else np.float32(1.0)
+# off_axis_table_len = np.int32(off_axis_softening_fs_interp.shape[0])
+# dose_banked(
+#     dose_grid_gpu,
+#     resolution_gpu,
+#     num_voxels_gpu,
+#     corner_gpu,
+#     density_grid_gpu,
+#     d_geo_grid_gpu,
+#     d_eff_grid_gpu,
+#     terma_grid_gpu,
+#     mask_grid_gpu,
+#     oad_grid_gpu,
+#     kernel_thetas_gpu,
+#     kernel_phis_c_gpu,
+#     kernel_omegas_gpu,
+#     # kernel bank
+#     kernel_bank_gpu,
+#     n_T_bins,
+#     T_min,
+#     T_step,
+#     # Off-axis softening LUT
+#     off_axis_softening_fs_interp_gpu,
+#     off_axis_table_len,
+#     np.float32(off_axis_softening_dx),
+#     # Geom/scales
+#     np.float32(source.sad),
+#     source_position_gpu,
+#     source_v_x_gpu,
+#     source_v_y_gpu,
+#     source_v_z_gpu,
+#     # Kernel sampling
+#     np.int32(1192),     # n depth bins
+#     np.float32(0.05),   # kernel depth resolution (cm)
+#     np.float32(59.6),   # max kernel depth (cm)
+#     np.float32(0.05),   # ray-march step (cm)
+#     block=threadsperblock,
+#     grid=blockspergrid
+# )
+# cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
 
 
 

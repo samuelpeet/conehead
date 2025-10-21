@@ -6,12 +6,10 @@ from scipy.optimize import minimize
 
 
 # def optimise_me(v):
-
-
 # v = [0.93, 0.1, 2.]
 # v = [0.94464603, 0.13938043, 2.75990415]
-v = [0.923088, 0.09061906, 2.00789403]
-
+# v = [0.923088, 0.09061906, 2.00789403]
+v = [0.98373769,  0.14093192, 25.26913868]
 
 # Example arrays: 560x560, 0.1 cm pitch per pixel
 H = W = 560
@@ -48,8 +46,8 @@ sigma_pix_y = sec_y / pixel_pitch_cm
 sec_fluence = gaussian_filter(T_total, sigma=(sigma_pix_x, sigma_pix_y), mode='nearest')
 
 # Beam profile correction filter
-oads = [0.0, 1.0, 2.0, 3.0, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 24.5, 24.7, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0]
-factors = [1.000, 1.002, 1.005, 1.005, 1.012, 1.016, 1.013, 1.010, 1.004, 1.000, 1.000, 1.000, 0.995, 0.990, 0.950, 0.800, 0.750, 0.750, 0.250, 0.000, 0.000, 0.000, 0.000, 0.000]
+oads = [0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 9.0, 11.0, 12.0, 15.0, 17.0, 19.0, 21.0, 23.0, 24.0, 24.5, 25.0, 25.5, 26.0, 30.0]
+factors = [1.000, 0.998, 0.981, 0.960, 0.901, 0.837, 0.780, 0.727, 0.696, 0.625, 0.578, 0.537, 0.510, 0.475, 0.450, 0.440, 0.200, 0.100, 0.000, 0.000]
 bpc_interp = make_interp_spline(oads, factors, k=1)
 x = np.arange(-28, 28, 0.1, dtype=np.float32)
 y = np.arange(-28, 28, 0.1, dtype=np.float32)
@@ -61,7 +59,7 @@ total_fluence = pri_s * pri_fluence * bpc + sec_s * sec_fluence
 
 
 
-rs = np.load("fluence_40x40.npy")
+rs = np.load("fluence_40x40_6FFF.npy")
 rs[rs < 0] = 0
 
 
@@ -75,13 +73,12 @@ rs[rs < 0] = 0
 #     return diff * 1e6
 
 # # %%
-# x0 = [0.9, 0.101, 2.965]
-# bounds = [(0.8, 1.0), (0.01, 1), (1.0, 10.0)]
+# x0 = [0.95, 0.1, 25]
+# bounds = [(0.8, 1.0), (0.01, 1), (1.0, 30.0)]
 # result = minimize(optimise_me, x0, bounds=bounds, options={'disp': True})
 # print(result)
 # print(result.x)
-# # # %%
 
-# # %%
 
 # %%
+
