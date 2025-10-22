@@ -162,7 +162,6 @@ fluence_map_sec = fluence_map_sec.astype(np.float32)
 
 # Create python data arrays
 density_grid = phantom.densities
-blocked_grid = np.ones(density_grid.shape, dtype=np.float32)
 oad_grid = np.zeros(density_grid.shape, dtype=np.float32)
 d_geo_grid = np.zeros(density_grid.shape, dtype=np.float32)
 d_eff_grid = np.zeros(density_grid.shape, dtype=np.float32)
@@ -173,8 +172,6 @@ dose_grid = np.zeros(density_grid.shape, dtype=np.float32)
 
 # Allocate GPU memory
 density_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
-
-blocked_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 oad_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 d_geo_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 d_eff_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
@@ -325,7 +322,6 @@ cuda.memcpy_dtoh(fluence_grid, fluence_grid_gpu)
 
 # print("Calculating TERMA...")
 cuda.memcpy_htod(terma_grid_gpu, terma_grid)
-cuda.memcpy_htod(blocked_grid_gpu, blocked_grid)
 cuda.memcpy_htod(fluence_grid_gpu, fluence_grid)
 cuda.memcpy_htod(d_geo_grid_gpu, d_geo_grid)
 cuda.memcpy_htod(d_eff_grid_gpu, d_eff_grid)
@@ -338,7 +334,6 @@ cuda.memcpy_htod(oad_grid_gpu, oad_grid)
 cuda.memcpy_htod(off_axis_softening_fs_interp_gpu, off_axis_softening_fs_interp)
 terma(
     terma_grid_gpu,
-    blocked_grid_gpu,
     fluence_grid_gpu,
     d_geo_grid_gpu,
     d_eff_grid_gpu,

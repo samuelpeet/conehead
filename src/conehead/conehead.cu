@@ -425,20 +425,56 @@ __global__ void fluence(float *fluence_grid, float *fluence_map_pri, float *flue
     }
 }
 
-__global__ void terma(float *terma_grid, float *blocked_grid, float *fluence_grid, float *d_geo_grid, float *d_eff_grid, int *num_voxels, int num_energies, float *energy, float *energy_weights, float *mu_w, float source_sad, float *oad_grid, float *off_axis_softening_fs_interp, float off_axis_softening_dx)
+/**
+ * @brief Compute TERMA (total energy released per unit mass/volume) at each voxel.
+ *
+ * For each voxel this kernel computes a spectrally-weighted TERMA by combining
+ * the incident fluence with energy-dependent attenuation and energy deposition
+ * factors. The current implementation:
+ *   terma = sum_i [ energy_weights[i] * fluence * exp(-mu_w[i] * d_eff) * mu_w[i] * energy[i] ]
+ *
+ * After the spectral sum the kernel applies the "no-tilt" inverse-square
+ * descaling:
+ *   terma_out = terma * (d_geo / source_sad)^2
+ * This removes the inverse-square falloff from TERMA so the tilted kernel step
+ * can reapply the geometric scaling during dose convolution (see dose()).
+ *
+ * @param[out] terma_grid     Device output flattened grid (nx*ny*nz) where TERMA is written.
+ * @param fluence_grid        Device pointer to precomputed fluence (nx*ny*nz).
+ * @param d_geo_grid          Device pointer to geometric distances (nx*ny*nz).
+ * @param d_eff_grid          Device pointer to effective/radiological depths (nx*ny*nz).
+ * @param num_voxels          Device pointer to int[3] = {nx,ny,nz}.
+ * @param num_energies        Number of spectral energy bins (length of energy arrays).
+ * @param energy              Device pointer to per-bin energy values (length num_energies).
+ * @param energy_weights      Device pointer to per-bin weights (length num_energies).
+ * @param mu_w                Device pointer to per-bin linear attenuation coefficients (length num_energies).
+ * @param source_sad          Source-to-axis distance used for no-tilt descaling.
+ * @param oad_grid            Device pointer to off-axis distance grid (nx*ny*nz). Present but not used yet.
+ * @param off_axis_softening_fs_interp Device pointer to LUT for off-axis softening (unused, TODO).
+ * @param off_axis_softening_dx Grid spacing for off-axis softening LUT (unused, TODO).
+ *
+ * @note Current limitations / TODO
+ * - Off-axis softening is not yet applied (there is a commented-out block showing planned use of oad_grid
+ *   and off_axis_softening_fs_interp). Implementing that will modify per-bin energy_weights before summation.
+ */
+__global__ void terma(float *terma_grid, float *fluence_grid, float *d_geo_grid, float *d_eff_grid, int *num_voxels, int num_energies, float *energy, float *energy_weights, float *mu_w, float source_sad, float *oad_grid, float *off_axis_softening_fs_interp, float off_axis_softening_dx)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
 
-    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
-    {
-        int idx = x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1];
+    int nx = num_voxels[0];
+    int ny = num_voxels[1];
+    int nz = num_voxels[2];
 
-        float oad = oad_grid[idx];
-        int ix = (int)(oad / off_axis_softening_dx);
-        float oas = off_axis_softening_fs_interp[ix];
-        
+    if (x < nx && y < ny && z < nz)
+    {
+        int idx = x + y * nx + z * nx * ny;
+
+        // float oad = oad_grid[idx];
+        // int ix = (int)(oad / off_axis_softening_dx);
+        // float oas = off_axis_softening_fs_interp[ix];
+        //
         // float new_energy_weights[12]; // Assuming a maximum of 12 energy bins
         // for (int i = 0; i < num_energies; i++)
         // {
@@ -454,7 +490,6 @@ __global__ void terma(float *terma_grid, float *blocked_grid, float *fluence_gri
         //     new_energy_weights[i] /= sum_weights;
         // }
 
-
         float terma = 0;
         for (int i = 0; i < num_energies; i++)
         {
@@ -463,7 +498,7 @@ __global__ void terma(float *terma_grid, float *blocked_grid, float *fluence_gri
             ) * mu_w[i] * energy[i];
         }
         float no_tilt_descaling = (d_geo_grid[idx] / source_sad) * (d_geo_grid[idx] / source_sad);
-        terma_grid[idx] = terma * blocked_grid[idx] * no_tilt_descaling;
+        terma_grid[idx] = terma * no_tilt_descaling;
     }
 }
 
