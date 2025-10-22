@@ -22,26 +22,43 @@ __device__ float dot(float *a, float *b)
 //         v[2] /= n;
 //     }
 // }
-                
-__device__ float* line_plane_collision(float *pos_plane, float *ray_start, float *ray_direction, float *plane_normal, float epsilon)
+
+/**
+ * @brief Safe ray–plane intersection that writes the hit point and reports success.
+ *
+ * Computes P = ray_start + s * ray_direction such that plane_normal ⋅ P = 0
+ * (plane is assumed to pass through the origin of the given coordinate frame).
+ *
+ * @param[out] out_pos_plane  Pointer to float3 that will be written with the intersection point when true.
+ * @param ray_start           Ray origin (float3), passed by value.
+ * @param ray_direction       Ray direction (float3). Not required to be normalized.
+ * @param plane_normal        Plane normal (float3), expressed in the same coordinate frame.
+ * @param epsilon             Threshold to detect parallelism (use a small value like 1e-6f).
+ *
+ * @return true if a unique intersection exists and out_pos_plane is written;
+ *         false if the ray is parallel or nearly parallel to the plane
+ *         (i.e. |plane_normal ⋅ ray_direction| < epsilon).
+ *
+ * @note If the plane does not pass through the origin, subtract a known point on
+ *       the plane from ray_start before calling or extend the API to include a plane offset.
+ *       Caller must decide how to handle a false result (skip sample, use a default, etc.).
+ */
+__device__ bool line_plane_collision(float3 *out_pos_plane,
+                                     float3 ray_start,
+                                     float3 ray_direction,
+                                     float3 plane_normal,
+                                     float epsilon)
 {
     float ndotu = dot(plane_normal, ray_direction);
-    //if (abs(ndotu) < epsilon)
-    //{
-    //  return false;
-    //}
-
-    float w[3];
-    w[0] = ray_start[0];
-    w[1] = ray_start[1];
-    w[2] = ray_start[2];
-
-    float si = -dot(plane_normal, w) / ndotu;
-    pos_plane[0] = w[0] + si * ray_direction[0];
-    pos_plane[1] = w[1] + si * ray_direction[1];
-    pos_plane[2] = w[2] + si * ray_direction[2];
-
-    return pos_plane;
+    if (fabsf(ndotu) < epsilon) {
+        // Parallel (or nearly parallel). Caller should skip or handle specially.
+        return false;
+    }
+    float si = -dot(plane_normal, ray_start) / ndotu;
+    out_pos_plane->x = ray_start.x + si * ray_direction.x;
+    out_pos_plane->y = ray_start.y + si * ray_direction.y;
+    out_pos_plane->z = ray_start.z + si * ray_direction.z;
+    return true;
 }
 
 // Clearly a target for a 2D texture in future (TODO)
@@ -152,7 +169,7 @@ __global__ void oad(float *oad_grid, int *num_voxels, float *corner, float *reso
         distance_f3.z = source_position_f3.z - position_f3.z;
 
         // Project position to iso plane
-        line_plane_collision(pos_plane_f3, source_position_f3, distance_f3, source_v_y_f3, 1e-6);
+        line_plane_collision(&pos_plane_f3, source_position_f3, distance_f3, source_v_y_f3, 1e-6f);
 
         // Convert to source coords
         pos_source_f3.x = dot(source_v_x_f3, pos_plane_f3);
