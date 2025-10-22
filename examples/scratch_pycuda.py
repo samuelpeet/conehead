@@ -4,14 +4,14 @@ import matplotlib.pyplot as plt
 import toml
 import math
 from importlib.resources import files
-# import pycuda.driver as cuda
-# import pycuda.autoinit
+import pycuda.driver as cuda
+import pycuda.autoinit
 import shutil
 from scipy.optimize import minimize
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import make_interp_spline, RegularGridInterpolator
 import pandas as pd
-# from pycuda.compiler import SourceModule
+from pycuda.compiler import SourceModule
 from conehead.kernel import KernelMono
 from conehead.phantom import SimplePhantom
 from conehead.source import Source
@@ -203,7 +203,7 @@ kernel_bank_gpu = cuda.mem_alloc(kernel_bank.nbytes)
 
 
 # Compile the CUDA kernel
-cuda_code = open("conehead.cu").read()
+cuda_code = open(files("conehead").joinpath("conehead.cu")).read()
 mod = SourceModule(cuda_code)
 
 # Extract kernel functions
