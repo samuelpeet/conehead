@@ -1,27 +1,17 @@
-__device__ float dot(float *a, float *b)
+/**
+ * @brief Compute the dot product of two 3-component vectors.
+ *
+ * Returns the scalar product
+ * a.x*b.x + a.y*b.y + a.z*b.z.
+ *
+ * @param a First input vector (float3). Passed by value.
+ * @param b Second input vector (float3). Passed by value.
+ * @return The scalar dot product (float).
+ */
+__device__ float dot(float3 a, float3 b)
 {
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    return a.x * b.x + a.y * b.y + a.z * b.z;
 }
-                
-// // 3D vector cross product: out = a x b
-// __device__ void cross3(const float *a, const float *b, float *out)
-// {
-//     out[0] = a[1] * b[2] - a[2] * b[1];
-//     out[1] = a[2] * b[0] - a[0] * b[2];
-//     out[2] = a[0] * b[1] - a[1] * b[0];
-// }
-
-// // 3D vector normalization in-place
-// __device__ void normalize3(float *v)
-// {
-//     float n = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-//     if (n > 0.0f)
-//     {
-//         v[0] /= n;
-//         v[1] /= n;
-//         v[2] /= n;
-//     }
-// }
 
 /**
  * @brief Safe ray–plane intersection that writes the hit point and reports success.
