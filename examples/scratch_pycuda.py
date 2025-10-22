@@ -355,14 +355,12 @@ if settings["calculation"]["mask_enable"]:
     # print("Calculating mask...")
     cuda.memcpy_htod(mask_grid_gpu, mask_grid)
     cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
-    cuda.memcpy_htod(corner_gpu, grid.corner)
     cuda.memcpy_htod(resolution_gpu, grid.resolution)
     cuda.memcpy_htod(source_position_gpu, source.position)
     mask(
         mask_grid_gpu,
         terma_grid_gpu,
         num_voxels_gpu,
-        corner_gpu,
         resolution_gpu,
         np.float32(settings["calculation"]["mask_max_distance"]),
         np.float32(terma_grid.max() * settings["calculation"]["mask_terma_threshold"]),

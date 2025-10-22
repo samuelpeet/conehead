@@ -476,17 +476,38 @@ __global__ void terma(float *terma_grid, float *fluence_grid, float *d_geo_grid,
     }
 }
 
-__global__ void mask(float *mask_grid, float *terma_grid, int *num_voxels, float *corner, float *resolution, float max_distance_cm, float terma_threshold)
+/**
+ * @brief Build a binary computation mask to accelerate dose convolution.
+ *
+ * For each voxel this kernel searches outward along the eight diagonal
+ * directions (combinations of ±x, ±y, ±z) up to a maximum physical distance
+ * (max_distance_cm). If any voxel encountered (including the voxel itself at
+ * distance 0) has terma >= terma_threshold the mask for the central voxel is
+ * set to 1.0f; otherwise it is set to 0.0f. dose() uses this mask to skip
+ * expensive kernel convolution for voxels with negligible nearby TERMA.
+ *
+ * @param[out] mask_grid         Device output flattened grid (nx*ny*nz) of 0/1 flags.
+ * @param terma_grid             Device pointer to flattened TERMA grid (nx*ny*nz).
+ * @param num_voxels             Device pointer to int[3] = {nx,ny,nz}.
+ * @param resolution             Device pointer to float[3] voxel sizes (dx,dy,dz) in same units as max_distance_cm.
+ * @param max_distance_cm        Physical search radius (cm) used to determine neighborhood.
+ * @param terma_threshold        TERMA threshold; any neighbor with terma >= this marks the voxel as active.
+ */
+__global__ void mask(float *mask_grid, float *terma_grid, int *num_voxels, float *resolution, float max_distance_cm, float terma_threshold)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
 
+    int nx = num_voxels[0];
+    int ny = num_voxels[1];
+    int nz = num_voxels[2];
+
     int max_voxels_distance = (int)(max_distance_cm / fmin(resolution[0], fmin(resolution[1], resolution[2])));
 
-    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
+    if (x < nx && y < ny && z < nz)
     {
-        int idx = x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1];
+        int idx = x + y * nx + z * nx * ny;
 
         // We check 8 directions (±x, ±y, ±z)
         for (int ix = -1; ix <= 1; ix = ix + 2)  // Just alternate from negative to positive 1
@@ -497,16 +518,16 @@ __global__ void mask(float *mask_grid, float *terma_grid, int *num_voxels, float
                 {
                     for (int v = 0; v <= max_voxels_distance; v++)
                     {
-                        int nx = x + ix * v;
-                        int ny = y + iy * v;
-                        int nz = z + iz * v;
+                        int cx = x + ix * v;
+                        int cy = y + iy * v;
+                        int cz = z + iz * v;
 
                         // Ensure neighbor indices are within bounds
-                        if (nx >= 0 && nx < num_voxels[0] &&
-                            ny >= 0 && ny < num_voxels[1] &&
-                            nz >= 0 && nz < num_voxels[2])
+                        if (cx >= 0 && cx < nx &&
+                            cy >= 0 && cy < ny &&
+                            cz >= 0 && cz < nz)
                         {
-                            int n_idx = nx + ny * num_voxels[0] + nz * num_voxels[0] * num_voxels[1];
+                            int n_idx = cx + cy * nx + cz * nx * ny;
                             if (terma_grid[n_idx] >= terma_threshold)
                             {
                                 mask_grid[idx] = 1.0f;
