@@ -3,9 +3,13 @@ import numpy.typing as npt
 
 
 class DoseGrid:
-
-    def __init__(self, size: npt.NDArray[np.int32], origin: npt.NDArray[np.float32], spacing: npt.NDArray[np.float32]):
-        self.num_voxels: npt.NDArray[np.int32] = size
-        self.corner: npt.NDArray[np.float32] = origin
-        self.resolution: npt.NDArray[np.float32] = spacing
-        self.dose: npt.NDArray[np.float32] = np.zeros(self.num_voxels, dtype=np.float32)
+    def __init__(
+        self,
+        num_voxels: npt.ArrayLike,
+        corner: npt.ArrayLike,
+        resolution: npt.ArrayLike,
+    ):
+        self.num_voxels: npt.NDArray[np.int32] = np.asarray(num_voxels, dtype=np.int32)
+        self.corner: npt.NDArray[np.float32] = np.asarray(corner, dtype=np.float32)
+        self.resolution: npt.NDArray[np.float32] = np.asarray(resolution, dtype=np.float32)
+        self.dose: npt.NDArray[np.float32] = np.zeros(tuple(self.num_voxels.tolist()), dtype=np.float32)
