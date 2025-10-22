@@ -51,32 +51,6 @@ __device__ bool line_plane_collision(float3 *out_pos_plane,
     return true;
 }
 
-// Clearly a target for a 2D texture in future (TODO)
-__device__ float block_transmission(float *position, float *block_values)
-{
-    position[0] = floor(position[0] * 100); // Convert tenth of a mm
-    position[1] = floor(position[1] * 100);
-
-    position[0] = position[0] + 2000;
-    position[1] = position[1] + 2000;
-
-    // Handle position lying outside the defined blocking area
-    for (int i = 0; i < 2; i++)
-    {
-        if (position[i] < 0 || position[i] > 3999)
-        {
-            return 0;
-        }
-    }
-
-    int ix = (int)(position[0]) - 1;
-    int iy = (int)(position[1]) - 1;
-    // Assuming block_values is a 1D array representing a 4000x4000 grid
-    int width = 4000;
-    float transmission = block_values[ix + iy * width];
-    return transmission;
-}
-
 /**
  * @brief Lookup fluence value from a flattened 2D fluence map.
  *
