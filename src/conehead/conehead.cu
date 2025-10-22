@@ -135,19 +135,19 @@ __global__ void oad(float *oad_grid, int *num_voxels, float *corner, float *reso
     int ny = num_voxels[1];
     int nz = num_voxels[2];
 
-    float3 corner_f3 = make_float3(corner[0], corner[1], corner[2]);
-    float3 resolution_f3 = make_float3(resolution[0], resolution[1], resolution[2]);
-    float3 source_position_f3 = make_float3(source_position[0], source_position[1], source_position[2]);
-    float3 source_v_x_f3 = make_float3(source_v_x[0], source_v_x[1], source_v_x[2]);
-    float3 source_v_y_f3 = make_float3(source_v_y[0], source_v_y[1], source_v_y[2]);
-    float3 source_v_z_f3 = make_float3(source_v_z[0], source_v_z[1], source_v_z[2]);
-    float3 position_f3 = make_float3(0.0f, 0.0f, 0.0f);
-    float3 distance_f3 = make_float3(0.0f, 0.0f, 0.0f);
-    float3 pos_plane_f3 = make_float3(0.0f, 0.0f, 0.0f);
-    float3 pos_source_f3 = make_float3(0.0f, 0.0f, 0.0f);
-
     if (x < nx && y < ny && z < nz)
     {
+        float3 corner_f3 = make_float3(corner[0], corner[1], corner[2]);
+        float3 resolution_f3 = make_float3(resolution[0], resolution[1], resolution[2]);
+        float3 source_position_f3 = make_float3(source_position[0], source_position[1], source_position[2]);
+        float3 source_v_x_f3 = make_float3(source_v_x[0], source_v_x[1], source_v_x[2]);
+        float3 source_v_y_f3 = make_float3(source_v_y[0], source_v_y[1], source_v_y[2]);
+        float3 source_v_z_f3 = make_float3(source_v_z[0], source_v_z[1], source_v_z[2]);
+        float3 position_f3 = make_float3(0.0f, 0.0f, 0.0f);
+        float3 distance_f3 = make_float3(0.0f, 0.0f, 0.0f);
+        float3 pos_plane_f3 = make_float3(0.0f, 0.0f, 0.0f);
+        float3 pos_source_f3 = make_float3(0.0f, 0.0f, 0.0f);
+
         // Get voxel position
         position_f3.x = corner_f3.x + resolution_f3.x * (x + 0.5);
         position_f3.y = corner_f3.y + resolution_f3.y * (y + 0.5);
@@ -170,29 +170,49 @@ __global__ void oad(float *oad_grid, int *num_voxels, float *corner, float *reso
     }
 }           
 
-
-__global__ void d_geo(float *d_geo, int *num_voxels, float *corner, float *resolution, float *source_position)
+/**
+ * @brief Compute geometric distance from the source to each voxel centre.
+ *
+ * Each CUDA thread computes the Euclidean distance from the provided source
+ * position to the centre of a single voxel and writes that scalar into
+ * d_geo_grid at the flattened index (x + y*nx + z*nx*ny).
+ *
+ * @param d_geo_grid     Device output pointer to flattened grid (nx*ny*nz) where distances are written.
+ * @param num_voxels     Device pointer to int[3] containing {nx, ny, nz}.
+ * @param corner         Device pointer to float[3] world-space corner coordinates of the grid.
+ * @param resolution     Device pointer to float[3] voxel sizes (dx, dy, dz).
+ * @param source_position Device pointer to float[3] source position in world coordinates.
+ */
+__global__ void d_geo(float *d_geo_grid, int *num_voxels, float *corner, float *resolution, float *source_position)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
-    
-    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
-    {
-        // Get voxel position
-        float position[3];
-        position[0] = corner[0] + resolution[0] * (x + 0.5);
-        position[1] = corner[1] + resolution[1] * (y + 0.5);
-        position[2] = corner[2] + resolution[2] * (z + 0.5);
 
-        // Determine direction to source
-        float ray_direction[3];
-        ray_direction[0] = source_position[0] - position[0];
-        ray_direction[1] = source_position[1] - position[1];
-        ray_direction[2] = source_position[2] - position[2];
-        float mag = sqrt(ray_direction[0]*ray_direction[0] + ray_direction[1]*ray_direction[1] + ray_direction[2]*ray_direction[2]);
-        int idx = x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1];
-        d_geo[idx] = mag;
+    int nx = num_voxels[0];
+    int ny = num_voxels[1];
+    int nz = num_voxels[2];
+
+    if (x < nx && y < ny && z < nz)
+    {
+        float3 corner_f3 = make_float3(corner[0], corner[1], corner[2]);
+        float3 resolution_f3 = make_float3(resolution[0], resolution[1], resolution[2]);
+        float3 source_position_f3 = make_float3(source_position[0], source_position[1], source_position[2]);
+        float3 position_f3 = make_float3(0.0f, 0.0f, 0.0f);
+        float3 ray_direction_f3 = make_float3(0.0f, 0.0f, 0.0f);
+
+        // Get voxel position
+        position_f3.x = corner_f3.x + resolution_f3.x * (x + 0.5);
+        position_f3.y = corner_f3.y + resolution_f3.y * (y + 0.5);
+        position_f3.z = corner_f3.z + resolution_f3.z * (z + 0.5);
+
+        // Determine direction/distance to source
+        ray_direction_f3.x = source_position_f3.x - position_f3.x;
+        ray_direction_f3.y = source_position_f3.y - position_f3.y;
+        ray_direction_f3.z = source_position_f3.z - position_f3.z;
+        float mag = sqrt(ray_direction_f3.x * ray_direction_f3.x + ray_direction_f3.y * ray_direction_f3.y + ray_direction_f3.z * ray_direction_f3.z);
+        int idx = x + y * nx + z * nx * ny;
+        d_geo_grid[idx] = mag;
     }
 }
 
