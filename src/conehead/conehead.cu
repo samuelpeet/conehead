@@ -94,64 +94,6 @@ __device__ float fluence_map_lookup(float *position, float *fluence_map)
     return fluence;
 }
 
-__global__ void hit_test(float *blocked_grid, int *num_voxels, float *corner, float *resolution, float *source_position, float *source_v_x, float *source_v_y, float *source_v_z, float *block_values, int samples)
-{
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    int z = blockIdx.z * blockDim.z + threadIdx.z;
-    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
-    {
-        float position[3];
-        position[0] = corner[0] + resolution[0] * x;
-        position[1] = corner[1] + resolution[1] * y;
-        position[2] = corner[2] + resolution[2] * z;
-
-        float offset[3];
-        offset[0] = resolution[0] / samples;
-        offset[1] = resolution[1] / samples;
-        offset[2] = resolution[2] / samples;
-
-        float block_factor = 0;
-        for (int ix = 0; ix < samples; ix++)
-        {
-            for (int iy = 0; iy < samples; iy++)
-            {
-                for (int iz = 0; iz < samples; iz++)
-                {
-
-                    // Position of sample
-                    float pos_sample[3];
-                    pos_sample[0] = position[0] + offset[0]/2 + offset[0] * ix;
-                    pos_sample[1] = position[1] + offset[1]/2 + offset[1] * iy;
-                    pos_sample[2] = position[2] + offset[2]/2 + offset[2] * iz;
-
-                    // Determine position on blocking plane in global coords
-                    float ray_direction[3];
-                    ray_direction[0] = source_position[0] - pos_sample[0];
-                    ray_direction[1] = source_position[1] - pos_sample[1];
-                    ray_direction[2] = source_position[2] - pos_sample[2];
-
-                    float pos_plane[3];
-                    line_plane_collision(pos_plane, source_position, ray_direction, source_v_y, 1e-6);
-
-                    // Convert to source coords
-                    float pos_block[3];
-                    pos_block[0] = dot(source_v_x, pos_plane);
-                    pos_block[1] = dot(source_v_y, pos_plane);
-                    pos_block[2] = dot(source_v_z, pos_plane);
-
-                    // Reduce to 2D
-                    float pos_block_2d[2];
-                    pos_block_2d[0] = pos_block[0];
-                    pos_block_2d[1] = pos_block[2];
-                    block_factor = block_factor + block_transmission(pos_block_2d, block_values) / (samples*samples*samples);
-                }
-            }
-        }
-        blocked_grid[x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1]] = block_factor;
-    }
-}
-
 /**
  * @brief Compute off‑axis distance (OAD) per voxel.
  *
