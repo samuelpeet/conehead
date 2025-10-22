@@ -216,34 +216,58 @@ __global__ void d_geo(float *d_geo_grid, int *num_voxels, float *corner, float *
     }
 }
 
-// Could potentially use a texture for density_grid here (TODO)
-__global__ void d_eff(float *d_eff, int *num_voxels, float *corner, float *resolution, float *density_grid, float *source_position)
+/**
+ * @brief Compute radiological (effective) depth from each voxel toward the source.
+ *
+ * This kernel implements a simple ray-marching integration from the centre of
+ * each voxel toward the source position. For each step along the ray it
+ * samples the provided density_grid and accumulates density * ds into an
+ * accumulator which is written to d_eff_grid at the voxel's flattened index.
+ * The per-step increment ds is computed as:
+ *       ds = 0.25 * min(dx, dy, dz)
+ * where dx/dy/dz are the voxel resolutions passed in `resolution`.
+ *
+ * @param d_eff_grid     Device output pointer to flattened grid (nx*ny*nz).
+ * @param num_voxels     Device pointer to int[3] containing {nx, ny, nz}.
+ * @param corner         Device pointer to float[3] world-space corner coordinates.
+ * @param resolution     Device pointer to float[3] voxel sizes (dx, dy, dz).
+ * @param density_grid   Device pointer to flattened density grid co-located with voxels.
+ * @param source_position Device pointer to float[3] source position in world coordinates.
+ */
+__global__ void d_eff(float *d_eff_grid, int *num_voxels, float *corner, float *resolution, float *density_grid, float *source_position)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
-    
-    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
+
+    int nx = num_voxels[0];
+    int ny = num_voxels[1];
+    int nz = num_voxels[2];
+
+    if (x < nx && y < ny && z < nz)
     {
+        float3 corner_f3 = make_float3(corner[0], corner[1], corner[2]);
+        float3 resolution_f3 = make_float3(resolution[0], resolution[1], resolution[2]);
+        float3 source_position_f3 = make_float3(source_position[0], source_position[1], source_position[2]);
+        float3 position_f3 = make_float3(0.0f, 0.0f, 0.0f);
+        float3 ray_direction_f3 = make_float3(0.0f, 0.0f, 0.0f);
 
         // Get voxel position
-        float position[3];
-        position[0] = corner[0] + resolution[0] * (x + 0.5);
-        position[1] = corner[1] + resolution[1] * (y + 0.5);
-        position[2] = corner[2] + resolution[2] * (z + 0.5);
+        position_f3.x = corner_f3.x + resolution_f3.x * (x + 0.5);
+        position_f3.y = corner_f3.y + resolution_f3.y * (y + 0.5);
+        position_f3.z = corner_f3.z + resolution_f3.z * (z + 0.5);
 
         // Determine direction to source
-        float ray_direction[3];
-        ray_direction[0] = source_position[0] - position[0];
-        ray_direction[1] = source_position[1] - position[1];
-        ray_direction[2] = source_position[2] - position[2];
-        float mag = sqrt(ray_direction[0]*ray_direction[0] + ray_direction[1]*ray_direction[1] + ray_direction[2]*ray_direction[2]);
-        ray_direction[0] /= mag;
-        ray_direction[1] /= mag;
-        ray_direction[2] /= mag;
+        ray_direction_f3.x = source_position_f3.x - position_f3.x;
+        ray_direction_f3.y = source_position_f3.y - position_f3.y;
+        ray_direction_f3.z = source_position_f3.z - position_f3.z;
+        float mag = sqrt(ray_direction_f3.x * ray_direction_f3.x + ray_direction_f3.y * ray_direction_f3.y + ray_direction_f3.z * ray_direction_f3.z);
+        ray_direction_f3.x /= mag;
+        ray_direction_f3.y /= mag;
+        ray_direction_f3.z /= mag;
 
-        // Precompute things
-        float ds = 0.25 * fmin(fmin(resolution[0], resolution[1]), resolution[2]);
+        // Compute steplength and number of steps
+        float ds = 0.25 * fmin(fmin(resolution_f3.x, resolution_f3.y), resolution_f3.z);
         float total_distance = mag;
         int steps = (int)(total_distance / ds);
         float acc = 0;
@@ -251,28 +275,28 @@ __global__ void d_eff(float *d_eff, int *num_voxels, float *corner, float *resol
         for (int i = 0; i < steps; i++)
         {
             // Move a step toward source
-            position[0] += ray_direction[0] * ds;
-            position[1] += ray_direction[1] * ds;
-            position[2] += ray_direction[2] * ds;
+            position_f3.x += ray_direction_f3.x * ds;
+            position_f3.y += ray_direction_f3.y * ds;
+            position_f3.z += ray_direction_f3.z * ds;
 
             // Map position → voxel indices
-            int ix = (int)((position[0] - corner[0]) / resolution[0]);
-            int iy = (int)((position[1] - corner[1]) / resolution[1]);
-            int iz = (int)((position[2] - corner[2]) / resolution[2]);
-            
-            if (ix < 0 || ix >= num_voxels[0] || iy < 0 || iy >= num_voxels[1] || iz < 0 || iz >= num_voxels[2])
+            int ix = (int)((position_f3.x - corner_f3.x) / resolution_f3.x);
+            int iy = (int)((position_f3.y - corner_f3.y) / resolution_f3.y);
+            int iz = (int)((position_f3.z - corner_f3.z) / resolution_f3.z);
+
+            if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || iz < 0 || iz >= nz)
             {
                 break;  // Ray left grid
             }
 
             // Accumulate density
-            int idx = ix + iy * num_voxels[0] + iz * num_voxels[0] * num_voxels[1];
+            int idx = ix + iy * nx + iz * nx * ny;
             acc += density_grid[idx] * ds;
         }
 
         // Store result
-        int idx = x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1];
-        d_eff[idx] = acc;
+        int idx = x + y * nx + z * nx * ny;
+        d_eff_grid[idx] = acc;
     }
 }
 
