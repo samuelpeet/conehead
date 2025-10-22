@@ -152,38 +152,72 @@ __global__ void hit_test(float *blocked_grid, int *num_voxels, float *corner, fl
     }
 }
 
+/**
+ * @brief Compute off‑axis distance (OAD) per voxel.
+ *
+ * For each voxel this kernel computes the voxel centre in world coordinates,
+ * projects it onto the source fluence plane (using the provided source basis
+ * vectors) and writes the radial off‑axis distance sqrt(x^2 + z^2) into
+ * oad_grid[idx].
+ *
+ * @param oad_grid       Device output pointer to flattened grid (nx*ny*nz).
+ * @param num_voxels     Device pointer to int[3] containing {nx, ny, nz}.
+ * @param corner         Device pointer to float[3] world-space corner coords.
+ * @param resolution     Device pointer to float[3] voxel sizes (dx,dy,dz).
+ * @param source_position Device pointer to float[3] source position in world coords.
+ * @param source_v_x     Device pointer to float[3] source local x axis.
+ * @param source_v_y     Device pointer to float[3] source local y axis (plane normal).
+ * @param source_v_z     Device pointer to float[3] source local z axis.
+ *
+ * @note Inputs are contiguous device arrays. This kernel currently uses
+ *       make_float3(...) for local work; consider texture/linear interpolation
+ *       for large lookup tables (TODO in code).
+ *
+ * @par Thread mapping
+ * Each CUDA thread computes exactly one voxel at (x,y,z) using blockIdx/threadIdx.
+ */
 __global__ void oad(float *oad_grid, int *num_voxels, float *corner, float *resolution, float *source_position, float *source_v_x, float *source_v_y, float *source_v_z)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
 
-    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
-    {
+    int nx = num_voxels[0];
+    int ny = num_voxels[1];
+    int nz = num_voxels[2];
 
+    float3 corner_f3 = make_float3(corner[0], corner[1], corner[2]);
+    float3 resolution_f3 = make_float3(resolution[0], resolution[1], resolution[2]);
+    float3 source_position_f3 = make_float3(source_position[0], source_position[1], source_position[2]);
+    float3 source_v_x_f3 = make_float3(source_v_x[0], source_v_x[1], source_v_x[2]);
+    float3 source_v_y_f3 = make_float3(source_v_y[0], source_v_y[1], source_v_y[2]);
+    float3 source_v_z_f3 = make_float3(source_v_z[0], source_v_z[1], source_v_z[2]);
+    float3 position_f3 = make_float3(0.0f, 0.0f, 0.0f);
+    float3 distance_f3 = make_float3(0.0f, 0.0f, 0.0f);
+    float3 pos_plane_f3 = make_float3(0.0f, 0.0f, 0.0f);
+    float3 pos_source_f3 = make_float3(0.0f, 0.0f, 0.0f);
+
+    if (x < nx && y < ny && z < nz)
+    {
         // Get voxel position
-        float position[3];
-        position[0] = corner[0] + resolution[0] * (x + 0.5);
-        position[1] = corner[1] + resolution[1] * (y + 0.5);
-        position[2] = corner[2] + resolution[2] * (z + 0.5);
+        position_f3.x = corner_f3.x + resolution_f3.x * (x + 0.5);
+        position_f3.y = corner_f3.y + resolution_f3.y * (y + 0.5);
+        position_f3.z = corner_f3.z + resolution_f3.z * (z + 0.5);
 
         // Determine distance/direction to source
-        float distance[3];
-        distance[0] = source_position[0] - position[0];
-        distance[1] = source_position[1] - position[1];
-        distance[2] = source_position[2] - position[2];
+        distance_f3.x = source_position_f3.x - position_f3.x;
+        distance_f3.y = source_position_f3.y - position_f3.y;
+        distance_f3.z = source_position_f3.z - position_f3.z;
 
         // Project position to iso plane
-        float pos_plane[3];
-        line_plane_collision(pos_plane, source_position, distance, source_v_y, 1e-6);
+        line_plane_collision(pos_plane_f3, source_position_f3, distance_f3, source_v_y_f3, 1e-6);
 
         // Convert to source coords
-        float pos_source[3];
-        pos_source[0] = dot(source_v_x, pos_plane);
-        pos_source[1] = dot(source_v_y, pos_plane);
-        pos_source[2] = dot(source_v_z, pos_plane);
-        int idx = x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1];
-        oad_grid[idx] = sqrt(pos_source[0] * pos_source[0] + pos_source[2] * pos_source[2]);
+        pos_source_f3.x = dot(source_v_x_f3, pos_plane_f3);
+        pos_source_f3.y = dot(source_v_y_f3, pos_plane_f3);
+        pos_source_f3.z = dot(source_v_z_f3, pos_plane_f3);
+        int idx = x + y * nx + z * nx * ny;
+        oad_grid[idx] = sqrt(pos_source_f3.x * pos_source_f3.x + pos_source_f3.z * pos_source_f3.z);
     }
 }           
 
