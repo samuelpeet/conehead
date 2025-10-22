@@ -77,11 +77,26 @@ __device__ float block_transmission(float *position, float *block_values)
     return transmission;
 }
 
-// Clearly a target for a 2D texture in future (TODO)
-__device__ float fluence_map_lookup(float *position, float *fluence_map)
+/**
+ * @brief Lookup fluence value from a flattened 2D fluence map.
+ *
+ * Map a 2D position to integer map indices and return the fluence stored
+ * in the flattened row-major map. Behavior and assumptions:
+ *  - The fluence map is a 560 × 560 grid.
+ *  - Each map element represents 1 mm.
+ *  - Input position is expected in centimeters (cm). The function multiplies
+ *    position by 10 to convert to millimetres (pos_mm = floor(position * 10)).
+ *  - A centering offset of +280 mm is applied to both axes before indexing.
+ *  - Out-of-bounds lookups return 0.0f.
+ *
+ * @param position   2D position (float2) in source-local/world coords (cm).
+ * @param fluence_map Flattened float array of length 560*560 (row-major).
+ * @return Fluence value at the mapped location, or 0.0f if outside bounds.
+ */
+__device__ float fluence_map_lookup(float2 position, float *fluence_map)
 {
-    float pos_x = floor(position[0] * 10); // Convert to mm
-    float pos_y = floor(position[1] * 10); // Convert to mm
+    float pos_x = floor(position.x * 10); // Convert to mm
+    float pos_y = floor(position.y * 10); // Convert to mm
 
     pos_x = pos_x + 280;
     pos_y = pos_y + 280;
@@ -109,7 +124,7 @@ __device__ float fluence_map_lookup(float *position, float *fluence_map)
  * vectors) and writes the radial off‑axis distance sqrt(x^2 + z^2) into
  * oad_grid[idx].
  *
- * @param oad_grid       Device output pointer to flattened grid (nx*ny*nz).
+ * @param[out] oad_grid       Device output pointer to flattened grid (nx*ny*nz).
  * @param num_voxels     Device pointer to int[3] containing {nx, ny, nz}.
  * @param corner         Device pointer to float[3] world-space corner coords.
  * @param resolution     Device pointer to float[3] voxel sizes (dx,dy,dz).
@@ -170,7 +185,7 @@ __global__ void oad(float *oad_grid, int *num_voxels, float *corner, float *reso
  * position to the centre of a single voxel and writes that scalar into
  * d_geo_grid at the flattened index (x + y*nx + z*nx*ny).
  *
- * @param d_geo_grid     Device output pointer to flattened grid (nx*ny*nz) where distances are written.
+ * @param[out] d_geo_grid  Device output pointer to flattened grid (nx*ny*nz) where distances are written.
  * @param num_voxels     Device pointer to int[3] containing {nx, ny, nz}.
  * @param corner         Device pointer to float[3] world-space corner coordinates of the grid.
  * @param resolution     Device pointer to float[3] voxel sizes (dx, dy, dz).
@@ -220,7 +235,7 @@ __global__ void d_geo(float *d_geo_grid, int *num_voxels, float *corner, float *
  *       ds = 0.25 * min(dx, dy, dz)
  * where dx/dy/dz are the voxel resolutions passed in `resolution`.
  *
- * @param d_eff_grid     Device output pointer to flattened grid (nx*ny*nz).
+ * @param[out] d_eff_grid     Device output pointer to flattened grid (nx*ny*nz).
  * @param num_voxels     Device pointer to int[3] containing {nx, ny, nz}.
  * @param corner         Device pointer to float[3] world-space corner coordinates.
  * @param resolution     Device pointer to float[3] voxel sizes (dx, dy, dz).
@@ -293,24 +308,77 @@ __global__ void d_eff(float *d_eff_grid, int *num_voxels, float *corner, float *
     }
 }
 
-
+/**
+ * @brief Compute fluence per voxel by projecting samples to fluence planes.
+ *
+ * For each voxel this kernel optionally supersamples the voxel volume (samples^3
+ * sub-voxels). For each sample it:
+ *  1. Computes the world-space sample position.
+ *  2. Forms a ray from the sample toward the source and projects the sample
+ *     onto the fluence plane (plane that passes through isocentre; normal = source_v_y).
+ *  3. Converts the projected point into the source-local coordinate frame
+ *     (using source_v_x, source_v_y, source_v_z) and reduces to a 2D plane
+ *     coordinate (x,z).
+ *  4. Looks up primary and secondary fluence values via fluence_map_lookup()
+ *     and accumulates them.
+ *  5. After all samples, applies inverse-square scaling using d_geo (and the
+ *     hard-coded pri_z/sec_z offsets) and stores fluence_pri + fluence_sec.
+ *
+ * @param[out] fluence_grid    Device output flattened grid (nx*ny*nz).
+ * @param fluence_map_pri      Device pointer to primary fluence 2D map (flattened).
+ * @param fluence_map_sec      Device pointer to secondary fluence 2D map (flattened).
+ * @param num_voxels           Device pointer to int[3] = {nx,ny,nz}.
+ * @param corner               Device pointer to float[3] world-space grid corner.
+ * @param resolution           Device pointer to float[3] voxel sizes (dx,dy,dz).
+ * @param d_geo_grid           Device pointer to precomputed geometric distances (nx*ny*nz).
+ * @param source_position      Device pointer to float[3] source position (world coords).
+ * @param source_v_x/y/z       Device pointer to float[3] source basis vectors (x,y(normal),z).
+ * @param source_sad           Source-to-axis distance used in rescaling.
+ * @param pri_s, pri_x,y,z     Per-primary-map parameters (map scale/offsets). pri_z is used
+ *                             in the inverse-square correction: ((source_sad - pri_z)/d)^2.
+ * @param sec_s, sec_x,y,z     Per-secondary-map parameters (map scale/offsets). sec_z likewise used.
+ * @param samples              Supersampling factor per axis (1 = no supersampling).
+ *
+ * @par Supersampling
+ * The kernel averages over samples^3 sub-voxels. Each sample contributes
+ * fluence_map_lookup(...) / (samples*samples*samples) to the accumulated fluence.
+ */
 __global__ void fluence(float *fluence_grid, float *fluence_map_pri, float *fluence_map_sec, int *num_voxels, float *corner, float *resolution, float *d_geo_grid, float *source_position, float *source_v_x, float *source_v_y, float *source_v_z, float source_sad, float pri_s, float pri_x, float pri_y, float pri_z, float sec_s, float sec_x, float sec_y, float sec_z, int samples)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
 
-    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
-    {
-        float position[3];
-        position[0] = corner[0] + resolution[0] * x;
-        position[1] = corner[1] + resolution[1] * y;
-        position[2] = corner[2] + resolution[2] * z;
+    int nx = num_voxels[0];
+    int ny = num_voxels[1];
+    int nz = num_voxels[2];
 
-        float offset[3];
-        offset[0] = resolution[0] / samples;
-        offset[1] = resolution[1] / samples;
-        offset[2] = resolution[2] / samples;
+    if (x < nx && y < ny && z < nz)
+    {
+
+        float3 corner_f3 = make_float3(corner[0], corner[1], corner[2]);
+        float3 resolution_f3 = make_float3(resolution[0], resolution[1], resolution[2]);
+        float3 source_position_f3 = make_float3(source_position[0], source_position[1], source_position[2]);
+        float3 source_v_x_f3 = make_float3(source_v_x[0], source_v_x[1], source_v_x[2]);
+        float3 source_v_y_f3 = make_float3(source_v_y[0], source_v_y[1], source_v_y[2]);
+        float3 source_v_z_f3 = make_float3(source_v_z[0], source_v_z[1], source_v_z[2]);
+        float3 position_f3 = make_float3(0.0f, 0.0f, 0.0f);
+        float3 offset_f3 = make_float3(0.0f, 0.0f, 0.0f);
+        float3 pos_sample_f3 = make_float3(0.0f, 0.0f, 0.0f);
+        float3 ray_direction_f3 = make_float3(0.0f, 0.0f, 0.0f);
+        float3 pos_plane_f3 = make_float3(0.0f, 0.0f, 0.0f);
+        float3 pos_fluence_map_f3 = make_float3(0.0f, 0.0f, 0.0f);
+        float2 pos_fluence_map_2d_f2 = make_float2(0.0f, 0.0f);
+
+        // Get voxel corner position
+        position_f3.x = corner_f3.x + resolution_f3.x * x;
+        position_f3.y = corner_f3.y + resolution_f3.y * y;
+        position_f3.z = corner_f3.z + resolution_f3.z * z;
+
+        // Prepare for supersampling loop
+        offset_f3.x = resolution_f3.x / samples;
+        offset_f3.y = resolution_f3.y / samples;
+        offset_f3.z = resolution_f3.z / samples;
 
         float fluence_pri = 0;
         float fluence_sec = 0;
@@ -320,44 +388,40 @@ __global__ void fluence(float *fluence_grid, float *fluence_map_pri, float *flue
             {
                 for (int iz = 0; iz < samples; iz++)
                 {
-
                     // Position of sample
-                    float pos_sample[3];
-                    pos_sample[0] = position[0] + offset[0]/2 + offset[0] * ix;
-                    pos_sample[1] = position[1] + offset[1]/2 + offset[1] * iy;
-                    pos_sample[2] = position[2] + offset[2]/2 + offset[2] * iz;
+                    pos_sample_f3.x = position_f3.x + offset_f3.x / 2 + offset_f3.x * ix;
+                    pos_sample_f3.y = position_f3.y + offset_f3.y / 2 + offset_f3.y * iy;
+                    pos_sample_f3.z = position_f3.z + offset_f3.z / 2 + offset_f3.z * iz;
 
                     // Determine position on fluence map plane in global coords
-                    float ray_direction[3];
-                    ray_direction[0] = source_position[0] - pos_sample[0];
-                    ray_direction[1] = source_position[1] - pos_sample[1];
-                    ray_direction[2] = source_position[2] - pos_sample[2];
-
-                    float pos_plane[3];
-                    line_plane_collision(pos_plane, source_position, ray_direction, source_v_y, 1e-6);
-                    // printf("pos_plane: %f, %f, %f\n", pos_plane[0], pos_plane[1], pos_plane[2]);
+                    ray_direction_f3.x = source_position_f3.x - pos_sample_f3.x;
+                    ray_direction_f3.y = source_position_f3.y - pos_sample_f3.y;
+                    ray_direction_f3.z = source_position_f3.z - pos_sample_f3.z;
+                    line_plane_collision(&pos_plane_f3, source_position_f3, ray_direction_f3, source_v_y_f3, 1e-6f);
 
                     // Convert to source coords
-                    float pos_fluence_map[3];
-                    pos_fluence_map[0] = dot(source_v_x, pos_plane);
-                    pos_fluence_map[1] = dot(source_v_y, pos_plane);
-                    pos_fluence_map[2] = dot(source_v_z, pos_plane);
-                    // printf("pos_fluence_map: %f, %f, %f\n", pos_fluence_map[0], pos_fluence_map[1], pos_fluence_map[2]);
+                    pos_fluence_map_f3.x = dot(source_v_x_f3, pos_plane_f3);
+                    pos_fluence_map_f3.y = dot(source_v_y_f3, pos_plane_f3);
+                    pos_fluence_map_f3.z = dot(source_v_z_f3, pos_plane_f3);
 
                     // Reduce to 2D
-                    float pos_fluence_map_2d[2];
-                    pos_fluence_map_2d[0] = pos_fluence_map[0];
-                    pos_fluence_map_2d[1] = pos_fluence_map[2];
-                    fluence_pri = fluence_pri + fluence_map_lookup(pos_fluence_map_2d, fluence_map_pri) / (samples*samples*samples);
-                    fluence_sec = fluence_sec + fluence_map_lookup(pos_fluence_map_2d, fluence_map_sec) / (samples*samples*samples);
-                    // printf("x:%f, y:%f, fluence sample: %f\n", pos_fluence_map_2d[0], pos_fluence_map_2d[1], fluence_map_lookup(pos_fluence_map_2d, fluence_map));
+                    pos_fluence_map_2d_f2.x = pos_fluence_map_f3.x;
+                    pos_fluence_map_2d_f2.y = pos_fluence_map_f3.z;
+
+                    // Accumulate fluence from primary and secondary sources
+                    fluence_pri = fluence_pri + fluence_map_lookup(pos_fluence_map_2d_f2, fluence_map_pri) / (samples*samples*samples);
+                    fluence_sec = fluence_sec + fluence_map_lookup(pos_fluence_map_2d_f2, fluence_map_sec) / (samples*samples*samples);
                 }
             }
         }
-        float d = d_geo_grid[x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1]];
-        fluence_pri = fluence_pri * (source_sad / d) * (source_sad / d);
-        fluence_sec = fluence_sec * ((source_sad - 10) / d) * ((source_sad - 10) / d);
-        fluence_grid[x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1]] = fluence_pri + fluence_sec;
+        // Apply inverse square law
+        int idx = x + y * nx + z * nx * ny;
+        float d = d_geo_grid[idx];
+        fluence_pri = fluence_pri * ((source_sad - pri_z) / d) * ((source_sad - pri_z) / d);
+        fluence_sec = fluence_sec * ((source_sad - sec_z) / d) * ((source_sad - sec_z) / d);
+
+        // Store result
+        fluence_grid[idx] = fluence_pri + fluence_sec;
     }
 }
 
