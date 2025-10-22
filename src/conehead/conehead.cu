@@ -117,13 +117,6 @@ __device__ float fluence_map_lookup(float *position, float *fluence_map)
  * @param source_v_x     Device pointer to float[3] source local x axis.
  * @param source_v_y     Device pointer to float[3] source local y axis (plane normal).
  * @param source_v_z     Device pointer to float[3] source local z axis.
- *
- * @note Inputs are contiguous device arrays. This kernel currently uses
- *       make_float3(...) for local work; consider texture/linear interpolation
- *       for large lookup tables (TODO in code).
- *
- * @par Thread mapping
- * Each CUDA thread computes exactly one voxel at (x,y,z) using blockIdx/threadIdx.
  */
 __global__ void oad(float *oad_grid, int *num_voxels, float *corner, float *resolution, float *source_position, float *source_v_x, float *source_v_y, float *source_v_z)
 {
@@ -301,106 +294,7 @@ __global__ void d_eff(float *d_eff_grid, int *num_voxels, float *corner, float *
 }
 
 
-
-// __global__ void fluence_plane(float *num_bixels, float *corner, float *resolution, float *source_position, float *source_v_y, float pri_s, float pri_x, float pri_y, float pri_z, float sec_s, float sec_x, float sec_y, float sec_z)
-// {
-//     int x = blockIdx.x * blockDim.x + threadIdx.x;
-//     int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-//     if (x < num_bixels[0] && y < num_bixels[1])
-//     {
-//         // Get bixel position
-//         float position[3];
-//         position[0] = corner[0] + resolution[0] * (x + 0.5);
-//         position[1] = corner[1] + resolution[1] * (y + 0.5);
-//         position[2] = 0.0;
-
-//         // Determine distance/direction to source
-//         float distance[3];
-//         distance[0] = source_position[0] - position[0];
-//         distance[1] = source_position[1] - position[1];
-//         distance[2] = source_position[2] - position[2];
-//         float mag = sqrt(
-//             distance[0] * distance[0] +
-//             distance[1] * distance[1] +
-//             distance[2] * distance[2]
-//         );
-
-//         line_plane_collision(pos_plane, source_position, ray_direction, source_v_y, 1e-6);
-
-
-//         // Point source
-//         float fluence_point = pri_s * pow(source_position[1] / mag, 2);
-
-//         int idx = x + y * num_bixels[0];
-//         num_bixels[idx] = fluence_point;
-//     }    
-// }
-
-
-
-
-
-// Could use textures at this point for both oad_grid and blocked_grid (TODO)               
-__global__ void fluence(float *fluence_grid, float *oad_grid, float *blocked_grid, int *num_voxels, float *corner, float *resolution, float *source_position, float *beam_profile_correction_fs_interp, float beam_profile_correction_dx, float source_sad, float sPri, float sAnn, float zAnn, float rInner, float rOuter, float zExp, float sExp, float kExp)
-{
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    int z = blockIdx.z * blockDim.z + threadIdx.z;
-
-    if (x < num_voxels[0] && y < num_voxels[1] && z < num_voxels[2])
-    {
-        // Get voxel position
-        float position[3];
-        position[0] = corner[0] + resolution[0] * (x + 0.5);
-        position[1] = corner[1] + resolution[1] * (y + 0.5);
-        position[2] = corner[2] + resolution[2] * (z + 0.5);
-
-        // Determine distance/direction to source
-        float distance[3];
-        distance[0] = source_position[0] - position[0];
-        distance[1] = source_position[1] - position[1];
-        distance[2] = source_position[2] - position[2];
-        float mag = sqrt(
-            distance[0] * distance[0] +
-            distance[1] * distance[1] +
-            distance[2] * distance[2]
-        );
-
-        // Point source
-        float fluence_point = sPri * pow(source_sad / mag, 2);
-        // float fluence_point = sPri;
-
-        int idx = x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1];
-        float oad = oad_grid[idx];
-
-        // Annular source
-        float fluence_ann;
-        float r_ann = oad * zAnn / source_sad;
-        if (r_ann >= rInner && r_ann <= rOuter)
-        {
-            fluence_ann = sAnn * pow(source_sad - zAnn, 2) / pow(mag - zAnn, 2);
-        }
-        else
-        {
-            fluence_ann = 0.0;
-        }
-
-        // Exponential source
-        if (oad < 2.0) { oad = 2.0; } // Avoid function blowing up near zero
-        float r_exp = oad * zExp / source_sad;
-        float fluence_exp = sExp / r_exp * exp(-kExp * r_exp) * pow(source_sad - zExp, 2) / pow(mag - zExp, 2);
-        
-        // Beam profile correction
-        int ix = (int)(oad / beam_profile_correction_dx);
-        float bpc = beam_profile_correction_fs_interp[ix];
-        fluence_grid[idx] = (fluence_point * bpc + fluence_ann + fluence_exp) * blocked_grid[idx];
-        // fluence_grid[idx] = fluence_point * blocked_grid[idx];
-    }
-}
-
-
-__global__ void fluence_new(float *fluence_grid, float *fluence_map_pri, float *fluence_map_sec, int *num_voxels, float *corner, float *resolution, float *d_geo_grid, float *source_position, float *source_v_x, float *source_v_y, float *source_v_z, float source_sad, float pri_s, float pri_x, float pri_y, float pri_z, float sec_s, float sec_x, float sec_y, float sec_z, int samples)
+__global__ void fluence(float *fluence_grid, float *fluence_map_pri, float *fluence_map_sec, int *num_voxels, float *corner, float *resolution, float *d_geo_grid, float *source_position, float *source_v_x, float *source_v_y, float *source_v_z, float source_sad, float pri_s, float pri_x, float pri_y, float pri_z, float sec_s, float sec_x, float sec_y, float sec_z, int samples)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;

@@ -160,7 +160,6 @@ fluence_map_sec = settings["sources_new"]["sec_s"] * sec_fluence
 fluence_map_pri = fluence_map_pri.astype(np.float32)
 fluence_map_sec = fluence_map_sec.astype(np.float32)
 
-## %%
 # Create python data arrays
 density_grid = phantom.densities
 blocked_grid = np.ones(density_grid.shape, dtype=np.float32)
@@ -214,7 +213,6 @@ oad = mod.get_function("oad")
 d_geo = mod.get_function("d_geo")
 d_eff = mod.get_function("d_eff")
 fluence = mod.get_function("fluence")
-fluence_new = mod.get_function("fluence_new")
 terma = mod.get_function("terma")
 mask = mod.get_function("mask")
 dose = mod.get_function("dose")
@@ -228,34 +226,6 @@ blockspergrid_y = math.ceil(density_grid.shape[1] / threadsperblock[1])
 blockspergrid_z = math.ceil(density_grid.shape[2] / threadsperblock[2])
 blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
 
-# ## %%
-# # print("Performing hit-testing of dose grid voxels...")
-# cuda.memcpy_htod(blocked_grid_gpu, blocked_grid)
-# cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
-# cuda.memcpy_htod(corner_gpu, grid.corner)
-# cuda.memcpy_htod(resolution_gpu, grid.resolution)
-# cuda.memcpy_htod(source_position_gpu, source.position)
-# cuda.memcpy_htod(source_v_x_gpu, source.v_x)
-# cuda.memcpy_htod(source_v_y_gpu, source.v_y)
-# cuda.memcpy_htod(source_v_z_gpu, source.v_z)
-# cuda.memcpy_htod(block_values_gpu, block.block_values)
-# hit_test(
-#     blocked_grid_gpu,
-#     num_voxels_gpu,
-#     corner_gpu,
-#     resolution_gpu,
-#     source_position_gpu,
-#     source_v_x_gpu,
-#     source_v_y_gpu,
-#     source_v_z_gpu,
-#     block_values_gpu,
-#     np.int32(settings["calculation"]["fluence_resampling"]),
-#     block=threadsperblock,
-#     grid=blockspergrid
-# )
-# cuda.memcpy_dtoh(blocked_grid, blocked_grid_gpu)
-
-## %%
 # print("Calculating off-axis distances")
 cuda.memcpy_htod(oad_grid_gpu, oad_grid)
 cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
@@ -279,7 +249,6 @@ oad(
 )
 cuda.memcpy_dtoh(oad_grid, oad_grid_gpu)
 
-## %%
 # print("Calculating geometric depths...")
 cuda.memcpy_htod(d_geo_grid_gpu, d_geo_grid)
 cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
@@ -297,7 +266,6 @@ d_geo(
 )
 cuda.memcpy_dtoh(d_geo_grid, d_geo_grid_gpu)
 
-## %%
 # print("Calculating effective depths...")
 cuda.memcpy_htod(d_eff_grid_gpu, d_eff_grid)
 cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
@@ -317,7 +285,6 @@ d_eff(
 )
 cuda.memcpy_dtoh(d_eff_grid, d_eff_grid_gpu)
 
-## %%
 # print("Calculating photon fluence...")
 cuda.memcpy_htod(fluence_grid_gpu, fluence_grid)
 cuda.memcpy_htod(fluence_map_pri_gpu, fluence_map_pri)
@@ -329,7 +296,7 @@ cuda.memcpy_htod(source_position_gpu, source.position)
 cuda.memcpy_htod(source_v_x_gpu, source.v_x)
 cuda.memcpy_htod(source_v_y_gpu, source.v_y)
 cuda.memcpy_htod(source_v_z_gpu, source.v_z)
-fluence_new(
+fluence(
     fluence_grid_gpu,
     fluence_map_pri_gpu,
     fluence_map_sec_gpu,
@@ -356,41 +323,6 @@ fluence_new(
 )
 cuda.memcpy_dtoh(fluence_grid, fluence_grid_gpu)
 
-# ## %%
-# # print("Calculating photon fluence...")
-# cuda.memcpy_htod(fluence_grid_gpu, fluence_grid)
-# cuda.memcpy_htod(oad_grid_gpu, oad_grid)
-# cuda.memcpy_htod(blocked_grid_gpu, blocked_grid)
-# cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
-# cuda.memcpy_htod(corner_gpu, grid.corner)
-# cuda.memcpy_htod(resolution_gpu, grid.resolution)
-# cuda.memcpy_htod(source_position_gpu, source.position)
-# cuda.memcpy_htod(beam_profile_correction_fs_interp_gpu, beam_profile_correction_fs_interp)
-# fluence(
-#     fluence_grid_gpu,
-#     oad_grid_gpu,
-#     blocked_grid_gpu,
-#     num_voxels_gpu,
-#     corner_gpu,
-#     resolution_gpu,
-#     source_position_gpu,
-#     beam_profile_correction_fs_interp_gpu,
-#     np.float32(beam_profile_correction_dx),
-#     np.float32(source.sad),
-#     np.float32(settings["sources_new"]["pri_s"]),
-#     np.float32(settings["sources_new"]['pri_x']),
-#     np.float32(settings["sources_new"]['pri_y']),
-#     np.float32(settings["sources_new"]['pri_z']),
-#     np.float32(settings["sources_new"]['sec_s']),
-#     np.float32(settings["sources_new"]['sec_x']),
-#     np.float32(settings["sources_new"]['sec_y']),
-#     np.float32(settings["sources_new"]['sec_z']),
-#     block=threadsperblock,
-#     grid=blockspergrid
-# )
-# cuda.memcpy_dtoh(fluence_grid, fluence_grid_gpu)
-
-## %%
 # print("Calculating TERMA...")
 cuda.memcpy_htod(terma_grid_gpu, terma_grid)
 cuda.memcpy_htod(blocked_grid_gpu, blocked_grid)
@@ -424,14 +356,6 @@ terma(
 )
 cuda.memcpy_dtoh(terma_grid, terma_grid_gpu)
 
-# tmp = terma_grid[50, :, 50]
-# terma_grid = np.zeros_like(density_grid, dtype=np.float32)
-# terma_grid[50, :, 50] = tmp  # Test TERMA
-
-# terma_grid = np.zeros_like(density_grid, dtype=np.float32)
-# terma_grid[50, 50, 50] = 1.0  # Test TERMA
-
-## %%
 if settings["calculation"]["mask_enable"]:
     # print("Calculating mask...")
     cuda.memcpy_htod(mask_grid_gpu, mask_grid)
@@ -455,7 +379,6 @@ else:
     # print("Skipping mask calculation.")
     mask_grid = np.ones(density_grid.shape, dtype=np.float32)
 
-## %%
 # print("Calculating dose...")
 cuda.memcpy_htod(dose_grid_gpu, dose_grid)
 cuda.memcpy_htod(resolution_gpu, grid.resolution)
