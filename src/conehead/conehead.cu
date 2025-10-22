@@ -187,8 +187,8 @@ __global__ void oad(float *oad_grid, int *num_voxels, float *corner, float *reso
     }
 }           
 
-// Could potentially use a texture for density_grid here (TODO)
-__global__ void d_geo(float *d_geo, int *num_voxels, float *corner, float *resolution, float *density_grid, float *source_position)
+
+__global__ void d_geo(float *d_geo, int *num_voxels, float *corner, float *resolution, float *source_position)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -373,7 +373,7 @@ __global__ void fluence(float *fluence_grid, float *oad_grid, float *blocked_gri
 }
 
 
-__global__ void fluence_new(float *fluence_grid, float *fluence_map, int *num_voxels, float *corner, float *resolution, float *source_position, float *source_v_x, float *source_v_y, float *source_v_z, float source_sad, float pri_s, float pri_x, float pri_y, float pri_z, float sec_s, float sec_x, float sec_y, float sec_z, int samples)
+__global__ void fluence_new(float *fluence_grid, float *fluence_map_pri, float *fluence_map_sec, int *num_voxels, float *corner, float *resolution, float *d_geo_grid, float *source_position, float *source_v_x, float *source_v_y, float *source_v_z, float source_sad, float pri_s, float pri_x, float pri_y, float pri_z, float sec_s, float sec_x, float sec_y, float sec_z, int samples)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -391,7 +391,8 @@ __global__ void fluence_new(float *fluence_grid, float *fluence_map, int *num_vo
         offset[1] = resolution[1] / samples;
         offset[2] = resolution[2] / samples;
 
-        float fluence = 0;
+        float fluence_pri = 0;
+        float fluence_sec = 0;
         for (int ix = 0; ix < samples; ix++)
         {
             for (int iy = 0; iy < samples; iy++)
@@ -426,12 +427,16 @@ __global__ void fluence_new(float *fluence_grid, float *fluence_map, int *num_vo
                     float pos_fluence_map_2d[2];
                     pos_fluence_map_2d[0] = pos_fluence_map[0];
                     pos_fluence_map_2d[1] = pos_fluence_map[2];
-                    fluence = fluence + fluence_map_lookup(pos_fluence_map_2d, fluence_map) / (samples*samples*samples);
+                    fluence_pri = fluence_pri + fluence_map_lookup(pos_fluence_map_2d, fluence_map_pri) / (samples*samples*samples);
+                    fluence_sec = fluence_sec + fluence_map_lookup(pos_fluence_map_2d, fluence_map_sec) / (samples*samples*samples);
                     // printf("x:%f, y:%f, fluence sample: %f\n", pos_fluence_map_2d[0], pos_fluence_map_2d[1], fluence_map_lookup(pos_fluence_map_2d, fluence_map));
                 }
             }
         }
-        fluence_grid[x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1]] = fluence;
+        float d = d_geo_grid[x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1]];
+        fluence_pri = fluence_pri * (source_sad / d) * (source_sad / d);
+        fluence_sec = fluence_sec * ((source_sad - 10) / d) * ((source_sad - 10) / d);
+        fluence_grid[x + y * num_voxels[0] + z * num_voxels[0] * num_voxels[1]] = fluence_pri + fluence_sec;
     }
 }
 
@@ -449,28 +454,28 @@ __global__ void terma(float *terma_grid, float *blocked_grid, float *fluence_gri
         int ix = (int)(oad / off_axis_softening_dx);
         float oas = off_axis_softening_fs_interp[ix];
         
-        float new_energy_weights[12]; // Assuming a maximum of 12 energy bins
-        for (int i = 0; i < num_energies; i++)
-        {
-            new_energy_weights[i] = energy_weights[i] * exp(mu_w[i] * (oas + d_eff_grid[idx]));
-        }
-        float sum_weights = 0;
-        for (int i = 0; i < num_energies; i++)
-        {
-            sum_weights += new_energy_weights[i];
-        }
-        for (int i = 0; i < num_energies; i++)
-        {
-            new_energy_weights[i] /= sum_weights;
-        }
+        // float new_energy_weights[12]; // Assuming a maximum of 12 energy bins
+        // for (int i = 0; i < num_energies; i++)
+        // {
+        //     new_energy_weights[i] = energy_weights[i] * exp(mu_w[i] * (oas + d_eff_grid[idx]));
+        // }
+        // float sum_weights = 0;
+        // for (int i = 0; i < num_energies; i++)
+        // {
+        //     sum_weights += new_energy_weights[i];
+        // }
+        // for (int i = 0; i < num_energies; i++)
+        // {
+        //     new_energy_weights[i] /= sum_weights;
+        // }
 
 
         float terma = 0;
         for (int i = 0; i < num_energies; i++)
         {
-            terma += new_energy_weights[i] * fluence_grid[idx] * exp(
+            terma += energy_weights[i] * fluence_grid[idx] * exp(
                 -mu_w[i] * (d_eff_grid[idx])
-            ) * energy[i] * mu_w[i];           
+            ) * mu_w[i] * energy[i];
         }
         float no_tilt_descaling = (d_geo_grid[idx] / source_sad) * (d_geo_grid[idx] / source_sad);
         terma_grid[idx] = terma * blocked_grid[idx] * no_tilt_descaling;

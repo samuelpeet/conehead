@@ -19,15 +19,16 @@ from conehead.dosegrid import DoseGrid
 from conehead.block import Block
 from conehead.nist import mu_water
 
-file_path = '6MV Beam Data.xlsx'
+file_path = '6FFF Beam Data.xlsx'
 df = pd.read_excel(file_path, sheet_name='Open Field Depth Dose')
 
-# def optimise_me(x):
+# def optimise_me(x_vals):
 
 ## %%
 settings = toml.load("settings_6FFF.toml")
 kernels = [
     KernelMono(files("conehead.kernels").joinpath("0.5MeV/0.5MeV.egslst")),
+    KernelMono(files("conehead.kernels").joinpath("1.0MeV/1.0MeV.egslst")),
     KernelMono(files("conehead.kernels").joinpath("1.5MeV/1.5MeV.egslst")),
     KernelMono(files("conehead.kernels").joinpath("2.0MeV/2.0MeV.egslst")),
     KernelMono(files("conehead.kernels").joinpath("2.5MeV/2.5MeV.egslst")),
@@ -39,21 +40,19 @@ kernels = [
     KernelMono(files("conehead.kernels").joinpath("5.5MeV/5.5MeV.egslst")),
     KernelMono(files("conehead.kernels").joinpath("6.0MeV/6.0MeV.egslst")),
 ]
-# %%
-# x = [5.709e-01,  1.004e-01]
+# # %%
+
+# x_vals = [0.21079902, 0.15580743, 0.02820613, 0.10272335, 0.12207865, 0.54867018, 0.47356048, 0.00222561, 0.00631351, 0.01025312]
 
 # # FOR OPTIMISATION ONLY
-# w = 1 / (np.sqrt(2 * np.pi) * x[1] * np.array(settings["energy_spectrum"]["energies"])) * np.exp(-(np.log(np.array(settings["energy_spectrum"]["energies"])) - x[0])**2 / (2 * x[1]**2))
-# # c1 = x[0]/(x[0] - x[1])
-# # c2 = 1 / (x[0] - x[1])
-# # w = (np.array(settings["energy_spectrum"]["energies"]) ** (c1 - 1)) * np.exp(-c2 * np.array(settings["energy_spectrum"]["energies"]))
-# settings["energy_spectrum"]["weights"] = w
-
+# # w = 1 / (np.sqrt(2 * np.pi) * x_vals[1] * np.array(settings["energy_spectrum"]["energies"])) * np.exp(-(np.log(np.array(settings["energy_spectrum"]["energies"])) - x_vals[0])**2 / (2 * x_vals[1]**2))
+# settings["energy_spectrum"]["weights"] = np.array([x_vals[0], x_vals[1], x_vals[2], x_vals[3], x_vals[4], x_vals[5], x_vals[6], x_vals[7], 0.0, x_vals[8], 0.0, x_vals[9]], dtype=np.float32)
+# settings["energy_spectrum"]["weights"] = settings["energy_spectrum"]["weights"] / settings["energy_spectrum"]["weights"].sum()  # normalise
 
 # Collapse per-energy kernels into a single kernel using global spectrum weights
 kernel = np.zeros_like(kernels[0].kernel, dtype=np.float32)
 for i in range(len(settings["energy_spectrum"]["energies"])):
-    kernel += kernels[i].kernel * settings["energy_spectrum"]["weights"][i]
+    kernel += kernels[i].kernel * settings["energy_spectrum"]["weights"][i] * settings["energy_spectrum"]["energies"][i]
 kernel = kernel / kernel.sum()  # normalise
 kernel_radii = kernels[0].radii_centres
 kernel_phis = kernels[0].angles
@@ -156,8 +155,10 @@ X, Y = np.meshgrid(x, y)
 r = np.sqrt(X**2 + Y**2)
 bpc = bpc_interp(r)
 
-fluence_map = settings["sources_new"]["pri_s"] * pri_fluence * bpc + settings["sources_new"]["sec_s"] * sec_fluence
-fluence_map = fluence_map.astype(np.float32)
+fluence_map_pri = settings["sources_new"]["pri_s"] * pri_fluence * bpc
+fluence_map_sec = settings["sources_new"]["sec_s"] * sec_fluence
+fluence_map_pri = fluence_map_pri.astype(np.float32)
+fluence_map_sec = fluence_map_sec.astype(np.float32)
 
 ## %%
 # Create python data arrays
@@ -178,7 +179,8 @@ blocked_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 oad_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 d_geo_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 d_eff_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
-fluence_map_gpu = cuda.mem_alloc(fluence_map.nbytes)
+fluence_map_pri_gpu = cuda.mem_alloc(fluence_map_pri.nbytes)
+fluence_map_sec_gpu = cuda.mem_alloc(fluence_map_sec.nbytes)
 fluence_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 terma_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
 mask_grid_gpu = cuda.mem_alloc(density_grid.nbytes)
@@ -283,14 +285,12 @@ cuda.memcpy_htod(d_geo_grid_gpu, d_geo_grid)
 cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
 cuda.memcpy_htod(corner_gpu, grid.corner)
 cuda.memcpy_htod(resolution_gpu, grid.resolution)
-cuda.memcpy_htod(density_grid_gpu, density_grid)
 cuda.memcpy_htod(source_position_gpu, source.position)
 d_geo(
     d_geo_grid_gpu,
     num_voxels_gpu,
     corner_gpu,
     resolution_gpu,
-    density_grid_gpu,
     source_position_gpu,
     block=threadsperblock,
     grid=blockspergrid,
@@ -320,7 +320,8 @@ cuda.memcpy_dtoh(d_eff_grid, d_eff_grid_gpu)
 ## %%
 # print("Calculating photon fluence...")
 cuda.memcpy_htod(fluence_grid_gpu, fluence_grid)
-cuda.memcpy_htod(fluence_map_gpu, fluence_map)
+cuda.memcpy_htod(fluence_map_pri_gpu, fluence_map_pri)
+cuda.memcpy_htod(fluence_map_sec_gpu, fluence_map_sec)
 cuda.memcpy_htod(num_voxels_gpu, grid.num_voxels)
 cuda.memcpy_htod(corner_gpu, grid.corner)
 cuda.memcpy_htod(resolution_gpu, grid.resolution)
@@ -330,10 +331,12 @@ cuda.memcpy_htod(source_v_y_gpu, source.v_y)
 cuda.memcpy_htod(source_v_z_gpu, source.v_z)
 fluence_new(
     fluence_grid_gpu,
-    fluence_map_gpu,
+    fluence_map_pri_gpu,
+    fluence_map_sec_gpu,
     num_voxels_gpu,
     corner_gpu,
     resolution_gpu,
+    d_geo_grid_gpu,
     source_position_gpu,
     source_v_x_gpu,
     source_v_y_gpu,
@@ -564,27 +567,21 @@ cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
 
 
 
-
-
-
-
-
-
 #     ## %%
 #     xs = np.linspace(0, 40, 201) + 0.1
 
-#     gold = np.interp(xs, df.iloc[5:, 0].to_numpy().astype(np.float32), (df.iloc[5:, 5]/df.iloc[5:, 5].max() * 100).to_numpy().astype(np.float32))
+#     gold = np.interp(xs, df.iloc[6:, 0].to_numpy().astype(np.float32), (df.iloc[6:, 5]/df.iloc[6:, 5].max() * 100).to_numpy().astype(np.float32))
 #     # gold = np.interp(xs, df.iloc[5:, 0].to_numpy().astype(np.float32), (df.iloc[5:, 5]/df.iloc[105, 5] * 100).to_numpy().astype(np.float32))
 #     calc = dose_grid[100, :, 100] / dose_grid[100, :, 100].max() * 100
 #     # calc = dose_grid[100, :, 100] / dose_grid[100, 50, 100] * 100
-#     diff = np.sum(np.abs(calc[10:149] - gold[10:149]))
-#     print(f"Weights: {x}, Diff: {diff}")
+#     diff = np.sum(np.abs(calc[4:149] - gold[4:149]))
+#     print(f"params: {x_vals}, Diff: {diff}")
 #     return diff
 
 
 # # %%
-# x0 = [1.0, 1.0]
-# bounds = [(0.1, 3) for _ in x0]
+# x0 = [0.2831, 0.15522, 0.09197, 0.06074, 0.04353, 0.03082, 0.02276, 0.01754, 0.01004, 0.00708]
+# bounds = [(0.001, 2) for _ in x0]
 # constraints = ({
 #     'type': 'ineq', 'fun': lambda x: x[1] - x[0] - 0.01,  # x[1] must be greater than x[0]
 # })
@@ -592,18 +589,59 @@ cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
 
 # # maxiter = 500
 # # result = minimize(optimise_me, x0, bounds=bounds, constraints=constraints, method ='COBYLA', options={'disp': True})
-# result = minimize(optimise_me, x0, bounds=bounds, method ='COBYLA', options={'disp': True})
+# result = minimize(optimise_me, x0, bounds=bounds, method='Nelder-Mead', options={'disp': True})
 
 # # Print the optimization result
 # print(f"Optimization Result: {result}")
 
-# # # file_path = '6MV Beam Data.xlsx'
-# # # df = pd.read_excel(file_path, sheet_name='Open Field Depth Dose')
-# # # xs = np.linspace(0, 40, 201) + 0.1
-# # # plt.plot(xs, dose_grid[100,:,100]/dose_grid[100,:,100].max() * 100)
-# # # plt.plot(df.iloc[5:, 0], df.iloc[5:, 5])
 
 
+# %%
+file_path = '6FFF Beam Data.xlsx'
+
+fig, ax = plt.subplots(3, 2, figsize=(10, 15))
+
+df = pd.read_excel(file_path, sheet_name='Open Field Profiles at 1.5cm')
+xs = np.arange(-20.1, 20.1, .2)
+ax[0, 0].plot(xs, dose_grid[100,7,:]/dose_grid[100,7,100] * 100 * (dose_grid[100,:,100]/dose_grid[100,:,100].max())[7])
+ax[0, 0].plot(df.iloc[8:, 0], df.iloc[8:, 5] * 0.999)
+ax[0, 0].set_xlim([-10, 10])
+ax[0, 0].set_ylim([0, 110])
+
+
+df = pd.read_excel(file_path, sheet_name='Open Field Profiles at 5cm')
+xs = np.arange(-20.1, 20.1, .2)
+ax[0, 1].plot(xs, dose_grid[100,25,:]/dose_grid[100,25,100] * 100 * (dose_grid[100,:,100]/dose_grid[100,:,100].max())[25])
+ax[0, 1].plot(df.iloc[8:, 0], df.iloc[8:, 5] * 0.846)
+ax[0, 1].set_xlim([-10, 10])
+ax[0, 1].set_ylim([0, 110])
+
+df = pd.read_excel(file_path, sheet_name='Open Field Profiles at 10cm')
+xs = np.arange(-20.1, 20.1, .2)
+ax[1, 0].plot(xs, dose_grid[100,50,:]/dose_grid[100,50,100] * 100 * (dose_grid[100,:,100]/dose_grid[100,:,100].max())[50])
+ax[1, 0].plot(df.iloc[8:, 0], df.iloc[8:, 5] * 0.635)
+ax[1, 0].set_xlim([-10, 10])
+ax[1, 0].set_ylim([0, 110])
+
+df = pd.read_excel(file_path, sheet_name='Open Field Profiles at 20cm')
+xs = np.arange(-20.1, 20.1, .2)
+ax[1, 1].plot(xs, dose_grid[100,100,:]/dose_grid[100,100,100] * 100 * (dose_grid[100,:,100]/dose_grid[100,:,100].max())[100])
+ax[1, 1].plot(df.iloc[8:, 0], df.iloc[8:, 5] * 0.347)
+ax[1, 1].set_xlim([-10, 10])
+ax[1, 1].set_ylim([0, 110])
+
+df = pd.read_excel(file_path, sheet_name='Open Field Profiles at 30cm')
+xs = np.arange(-20.1, 20.1, .2)
+ax[2, 0].plot(xs, dose_grid[100,150,:]/dose_grid[100,150,100] * 100 * (dose_grid[100,:,100]/dose_grid[100,:,100].max())[150])
+ax[2, 0].plot(df.iloc[8:, 0], df.iloc[8:, 5] * 0.192)
+ax[2, 0].set_xlim([-10, 10])
+ax[2, 0].set_ylim([0, 110])
+
+df_pdd = pd.read_excel(file_path, sheet_name='Open Field Depth Dose')
+xs = np.linspace(0, 40, 201) + 0.1
+ax[2, 1].plot(xs, dose_grid[100,:,100]/dose_grid[100,:,100].max() * 100)
+ax[2, 1].plot(df_pdd.iloc[6:, 0], df_pdd.iloc[6:, 5])
+ax[2, 1].set_xlim([0, 30])
 
 
 
