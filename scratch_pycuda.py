@@ -3,14 +3,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import toml
 import math
-import pycuda.driver as cuda
-import pycuda.autoinit
+from importlib.resources import files
+# import pycuda.driver as cuda
+# import pycuda.autoinit
 import shutil
 from scipy.optimize import minimize
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import make_interp_spline, RegularGridInterpolator
 import pandas as pd
-from pycuda.compiler import SourceModule
+# from pycuda.compiler import SourceModule
 from conehead.kernel import KernelMono
 from conehead.phantom import SimplePhantom
 from conehead.source import Source
@@ -26,20 +27,19 @@ df = pd.read_excel(file_path, sheet_name='Open Field Depth Dose')
 ## %%
 settings = toml.load("settings_6FFF.toml")
 kernels = [
-    KernelMono("kernels/0.5MeV/0.5MeV.egslst"),
-    KernelMono("kernels/1.0MeV/1.0MeV.egslst"),
-    KernelMono("kernels/1.5MeV/1.5MeV.egslst"),
-    KernelMono("kernels/2.0MeV/2.0MeV.egslst"),
-    KernelMono("kernels/2.5MeV/2.5MeV.egslst"),
-    KernelMono("kernels/3.0MeV/3.0MeV.egslst"),
-    KernelMono("kernels/3.5MeV/3.5MeV.egslst"),
-    KernelMono("kernels/4.0MeV/4.0MeV.egslst"),
-    KernelMono("kernels/4.5MeV/4.5MeV.egslst"),
-    KernelMono("kernels/5.0MeV/5.0MeV.egslst"),
-    KernelMono("kernels/5.5MeV/5.5MeV.egslst"),
-    KernelMono("kernels/6.0MeV/6.0MeV.egslst"),
+    KernelMono(files("conehead.kernels").joinpath("0.5MeV/0.5MeV.egslst")),
+    KernelMono(files("conehead.kernels").joinpath("1.5MeV/1.5MeV.egslst")),
+    KernelMono(files("conehead.kernels").joinpath("2.0MeV/2.0MeV.egslst")),
+    KernelMono(files("conehead.kernels").joinpath("2.5MeV/2.5MeV.egslst")),
+    KernelMono(files("conehead.kernels").joinpath("3.0MeV/3.0MeV.egslst")),
+    KernelMono(files("conehead.kernels").joinpath("3.5MeV/3.5MeV.egslst")),
+    KernelMono(files("conehead.kernels").joinpath("4.0MeV/4.0MeV.egslst")),
+    KernelMono(files("conehead.kernels").joinpath("4.5MeV/4.5MeV.egslst")),
+    KernelMono(files("conehead.kernels").joinpath("5.0MeV/5.0MeV.egslst")),
+    KernelMono(files("conehead.kernels").joinpath("5.5MeV/5.5MeV.egslst")),
+    KernelMono(files("conehead.kernels").joinpath("6.0MeV/6.0MeV.egslst")),
 ]
-
+# %%
 # x = [5.709e-01,  1.004e-01]
 
 # # FOR OPTIMISATION ONLY
@@ -121,13 +121,13 @@ mu_w = mu_water(energies)
 
 
 
-# Define the original (coarse) grid and data
+# Define the original (finer) grid and data
 # x_orig and y_orig represent the coordinates of the original grid points
 x_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
 y_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
 X_orig, Y_orig = np.meshgrid(x_orig, y_orig)
 
-# Define the target (finer) grid
+# Define the target (coarser) grid
 x_target = np.linspace(-28.0, 28.0, 560) # 560 points from -28 to 28
 y_target = np.linspace(-28.0, 28.0, 560) # 560 points from -28 to 28
 X_target, Y_target = np.meshgrid(x_target, y_target)
