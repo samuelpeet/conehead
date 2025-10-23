@@ -1,0 +1,78 @@
+num_voxels [1 x 3]
+corner [1 x 3]
+resolution [1 x 3]
+
+source.position [1 x 3]
+source.v_x [1 x 3]
+source.v_y [1 x 3]
+source.v_z [1 x 3]
+
+energies [1 x 12]
+energy_weights [1 x 12]
+mu_w [1 x 12]
+off_axis_softening_fs_interp [1 x 1001]
+off_axis_softening_dx [float]
+
+fluence_map_pri [560 x 560]
+fluence_map_sec [560 x 560]
+
+kernel_thetas [1 x 16]
+kernel_phis_c [1 x 12]
+kernel_omegas [1 x 12]
+kernel [12 x 1192]
+
+oad_grid [nx x ny x nz]
+d_geo_grid [nx x ny x nz]
+density_grid [nx x ny x nz]
+d_eff_grid [nx x ny x nz]
+fluence_grid [nx x ny x nz]
+terma_grid [nx x ny x nz]
+mask_grid [nx x ny x nz]
+dose_grid [nx x ny x nz]
+
+
+oad:
+----
+Load: oad_grid_gpu
+Load: num_voxels_gpu,
+Load: corner_gpu,
+Load: resolution_gpu,
+Load: source_position_gpu,
+Load: source_v_x_gpu,
+Load: source_v_y_gpu,
+Load: source_v_z_gpu,
+
+d_geo:
+------
+Load: d_geo_grid_gpu,
+
+d_eff:
+------
+Load: d_eff_grid_gpu,
+Load: density_grid_gpu,
+
+fluence:
+--------
+Load: fluence_grid_gpu,
+Load: fluence_map_pri_gpu,
+Load: fluence_map_sec_gpu,
+
+terma:
+------
+Load: terma_grid_gpu,
+Load: energies_gpu,
+Load: energy_weights_gpu,
+Load: mu_w_gpu,
+Load: off_axis_softening_fs_interp_gpu,
+
+mask:
+-----
+Load: mask_grid_gpu,
+
+dose:
+-----
+Load: dose_grid_gpu,
+Load: kernel_thetas_gpu,
+Load: kernel_phis_c_gpu,
+Load: kernel_omegas_gpu,
+Load: kernel_gpu,
