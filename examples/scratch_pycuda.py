@@ -1,26 +1,28 @@
 # %%
-import numpy as np
-import matplotlib.pyplot as plt
-import toml
 import math
-from importlib.resources import files
-import pycuda.driver as cuda 
-import pycuda.autoinit
 import shutil
-from scipy.optimize import minimize
-from scipy.ndimage import gaussian_filter
-from scipy.interpolate import make_interp_spline, RegularGridInterpolator
+from importlib.resources import files
+
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import pycuda.autoinit
+import pycuda.driver as cuda
+import toml
 from pycuda.compiler import SourceModule
+from scipy.interpolate import RegularGridInterpolator, make_interp_spline
+from scipy.ndimage import gaussian_filter
+from scipy.optimize import minimize
+
+from conehead.block import Block
+from conehead.dosegrid import DoseGrid
 from conehead.kernel import KernelMono
+from conehead.nist import mu_water
 from conehead.phantom import SimplePhantom
 from conehead.source import Source
-from conehead.dosegrid import DoseGrid
-from conehead.block import Block
-from conehead.nist import mu_water
 
-file_path = '6FFF Beam Data.xlsx'
-df = pd.read_excel(file_path, sheet_name='Open Field Depth Dose')
+file_path = "6FFF Beam Data.xlsx"
+df = pd.read_excel(file_path, sheet_name="Open Field Depth Dose")
 
 # def optimise_me(x_vals):
 
@@ -52,7 +54,11 @@ kernels = [
 # Collapse per-energy kernels into a single kernel using global spectrum weights
 kernel = np.zeros_like(kernels[0].kernel, dtype=np.float32)
 for i in range(len(settings["energy_spectrum"]["energies"])):
-    kernel += kernels[i].kernel * settings["energy_spectrum"]["weights"][i] * settings["energy_spectrum"]["energies"][i]
+    kernel += (
+        kernels[i].kernel
+        * settings["energy_spectrum"]["weights"][i]
+        * settings["energy_spectrum"]["energies"][i]
+    )
 kernel = kernel / kernel.sum()  # normalise
 kernel_radii = kernels[0].radii_centres
 kernel_phis = kernels[0].angles
@@ -88,7 +94,9 @@ kernel_omegas = (kernels[0].omegas / len(kernel_thetas)).astype(np.float32)
 
 off_axis_softening_oads = np.array(settings["off_axis_softening"]["oads"], dtype=np.float32)
 off_axis_softening_fs = np.array(settings["off_axis_softening"]["factors"], dtype=np.float32)
-off_axis_softening_oads_interp = np.linspace(off_axis_softening_oads[0], off_axis_softening_oads[-1], 1001, dtype=np.float32)
+off_axis_softening_oads_interp = np.linspace(
+    off_axis_softening_oads[0], off_axis_softening_oads[-1], 1001, dtype=np.float32
+)
 off_axis_softening_fs_interp = np.interp(  # Resample to high res for indexing into later
     off_axis_softening_oads_interp,
     off_axis_softening_oads,
@@ -100,13 +108,16 @@ phantom = SimplePhantom()
 source = Source()
 grid = DoseGrid(phantom.num_voxels, phantom.corner, phantom.resolution)
 block = Block()
-block.set_square(np.float32(10)) 
+block.set_square(np.float32(10))
 
-energies = np.array([np.float32(x) for x in settings["energy_spectrum"]["energies"]], dtype=np.float32)
-energy_weights = np.array([np.float32(x) for x in settings["energy_spectrum"]["weights"]], dtype=np.float32)
+energies = np.array(
+    [np.float32(x) for x in settings["energy_spectrum"]["energies"]], dtype=np.float32
+)
+energy_weights = np.array(
+    [np.float32(x) for x in settings["energy_spectrum"]["weights"]], dtype=np.float32
+)
 energy_weights = energy_weights / energy_weights.sum()  # normalise
 mu_w = mu_water(energies)
-
 
 
 # Define the original (finer) grid and data
@@ -116,11 +127,13 @@ y_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
 X_orig, Y_orig = np.meshgrid(x_orig, y_orig)
 
 # Define the target (coarser) grid
-x_target = np.linspace(-28.0, 28.0, 560) # 560 points from -28 to 28
-y_target = np.linspace(-28.0, 28.0, 560) # 560 points from -28 to 28
+x_target = np.linspace(-28.0, 28.0, 560)  # 560 points from -28 to 28
+y_target = np.linspace(-28.0, 28.0, 560)  # 560 points from -28 to 28
 X_target, Y_target = np.meshgrid(x_target, y_target)
 
-interpolator = RegularGridInterpolator((x_orig, y_orig), block.block_values, method='linear', bounds_error=False, fill_value=0)
+interpolator = RegularGridInterpolator(
+    (x_orig, y_orig), block.block_values, method="linear", bounds_error=False, fill_value=0
+)
 points_target = np.array([X_target.ravel(), Y_target.ravel()]).T
 block_interpolated = interpolator(points_target)
 block_interpolated_2d = block_interpolated.reshape(X_target.shape)
@@ -129,15 +142,21 @@ block_interpolated_2d = block_interpolated.reshape(X_target.shape)
 pixel_pitch_cm = 0.1  # cm
 sigma_pix_x = settings["sources_new"]["pri_x"] / pixel_pitch_cm
 sigma_pix_y = settings["sources_new"]["pri_y"] / pixel_pitch_cm
-pri_fluence = gaussian_filter(block_interpolated_2d, sigma=(sigma_pix_x, sigma_pix_y), mode='nearest')
+pri_fluence = gaussian_filter(
+    block_interpolated_2d, sigma=(sigma_pix_x, sigma_pix_y), mode="nearest"
+)
 
 # Secondary source blur
 sigma_pix_x = settings["sources_new"]["sec_x"] / pixel_pitch_cm
 sigma_pix_y = settings["sources_new"]["sec_y"] / pixel_pitch_cm
-sec_fluence = gaussian_filter(block_interpolated_2d, sigma=(sigma_pix_x, sigma_pix_y), mode='nearest')
+sec_fluence = gaussian_filter(
+    block_interpolated_2d, sigma=(sigma_pix_x, sigma_pix_y), mode="nearest"
+)
 
 # Beam profile correction filter
-bpc_interp = make_interp_spline(settings["beam_profile_correction"]["oads"], settings["beam_profile_correction"]["factors"], k=1)
+bpc_interp = make_interp_spline(
+    settings["beam_profile_correction"]["oads"], settings["beam_profile_correction"]["factors"], k=1
+)
 x = np.arange(-28, 28, 0.1, dtype=np.float32)
 y = np.arange(-28, 28, 0.1, dtype=np.float32)
 X, Y = np.meshgrid(x, y)
@@ -228,7 +247,7 @@ oad(
     source_v_y_gpu,
     source_v_z_gpu,
     block=threadsperblock,
-    grid=blockspergrid
+    grid=blockspergrid,
 )
 cuda.memcpy_dtoh(oad_grid, oad_grid_gpu)
 
@@ -293,16 +312,16 @@ fluence(
     source_v_z_gpu,
     np.float32(source.sad),
     np.float32(settings["sources_new"]["pri_s"]),
-    np.float32(settings["sources_new"]['pri_x']),
-    np.float32(settings["sources_new"]['pri_y']),
-    np.float32(settings["sources_new"]['pri_z']),
-    np.float32(settings["sources_new"]['sec_s']),
-    np.float32(settings["sources_new"]['sec_x']),
-    np.float32(settings["sources_new"]['sec_y']),
-    np.float32(settings["sources_new"]['sec_z']),
+    np.float32(settings["sources_new"]["pri_x"]),
+    np.float32(settings["sources_new"]["pri_y"]),
+    np.float32(settings["sources_new"]["pri_z"]),
+    np.float32(settings["sources_new"]["sec_s"]),
+    np.float32(settings["sources_new"]["sec_x"]),
+    np.float32(settings["sources_new"]["sec_y"]),
+    np.float32(settings["sources_new"]["sec_z"]),
     np.int32(settings["calculation"]["fluence_resampling"]),
     block=threadsperblock,
-    grid=blockspergrid
+    grid=blockspergrid,
 )
 cuda.memcpy_dtoh(fluence_grid, fluence_grid_gpu)
 
@@ -333,7 +352,7 @@ terma(
     off_axis_softening_fs_interp_gpu,
     np.float32(off_axis_softening_dx),
     block=threadsperblock,
-    grid=blockspergrid
+    grid=blockspergrid,
 )
 cuda.memcpy_dtoh(terma_grid, terma_grid_gpu)
 
@@ -351,7 +370,7 @@ if settings["calculation"]["mask_enable"]:
         np.float32(settings["calculation"]["mask_max_distance"]),
         np.float32(terma_grid.max() * settings["calculation"]["mask_terma_threshold"]),
         block=threadsperblock,
-        grid=blockspergrid
+        grid=blockspergrid,
     )
     cuda.memcpy_dtoh(mask_grid, mask_grid_gpu)
 else:
@@ -393,15 +412,14 @@ dose(
     source_v_x_gpu,
     source_v_y_gpu,
     source_v_z_gpu,
-    np.int32(1192),     # n depth bins
-    np.float32(0.05),   # kernel depth resolution (cm)
-    np.float32(59.6),   # max kernel depth (cm)
-    np.float32(0.05),   # ray-march step (cm)
+    np.int32(1192),  # n depth bins
+    np.float32(0.05),  # kernel depth resolution (cm)
+    np.float32(59.6),  # max kernel depth (cm)
+    np.float32(0.05),  # ray-march step (cm)
     block=threadsperblock,
-    grid=blockspergrid
+    grid=blockspergrid,
 )
 cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
-
 
 
 # # print("Calculating dose (kernel bank)...")
@@ -468,7 +486,6 @@ cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
 # cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
 
 
-
 #     ## %%
 #     xs = np.linspace(0, 40, 201) + 0.1
 
@@ -497,65 +514,82 @@ cuda.memcpy_dtoh(dose_grid, dose_grid_gpu)
 # print(f"Optimization Result: {result}")
 
 
-
 # %%
-file_path = '6FFF Beam Data.xlsx'
+file_path = "6FFF Beam Data.xlsx"
 
 fig, ax = plt.subplots(3, 2, figsize=(10, 15))
 
-df = pd.read_excel(file_path, sheet_name='Open Field Profiles at 1.5cm')
-xs = np.arange(-20.1, 20.1, .2)
-ax[0, 0].plot(xs, dose_grid[100,7,:]/dose_grid[100,7,100] * 100 * (dose_grid[100,:,100]/dose_grid[100,:,100].max())[7])
+df = pd.read_excel(file_path, sheet_name="Open Field Profiles at 1.5cm")
+xs = np.arange(-20.1, 20.1, 0.2)
+ax[0, 0].plot(
+    xs,
+    dose_grid[100, 7, :]
+    / dose_grid[100, 7, 100]
+    * 100
+    * (dose_grid[100, :, 100] / dose_grid[100, :, 100].max())[7],
+)
 ax[0, 0].plot(df.iloc[8:, 0], df.iloc[8:, 5] * 0.999)
 ax[0, 0].set_xlim([-10, 10])
 ax[0, 0].set_ylim([0, 110])
 
 
-df = pd.read_excel(file_path, sheet_name='Open Field Profiles at 5cm')
-xs = np.arange(-20.1, 20.1, .2)
-ax[0, 1].plot(xs, dose_grid[100,25,:]/dose_grid[100,25,100] * 100 * (dose_grid[100,:,100]/dose_grid[100,:,100].max())[25])
+df = pd.read_excel(file_path, sheet_name="Open Field Profiles at 5cm")
+xs = np.arange(-20.1, 20.1, 0.2)
+ax[0, 1].plot(
+    xs,
+    dose_grid[100, 25, :]
+    / dose_grid[100, 25, 100]
+    * 100
+    * (dose_grid[100, :, 100] / dose_grid[100, :, 100].max())[25],
+)
 ax[0, 1].plot(df.iloc[8:, 0], df.iloc[8:, 5] * 0.846)
 ax[0, 1].set_xlim([-10, 10])
 ax[0, 1].set_ylim([0, 110])
 
-df = pd.read_excel(file_path, sheet_name='Open Field Profiles at 10cm')
-xs = np.arange(-20.1, 20.1, .2)
-ax[1, 0].plot(xs, dose_grid[100,50,:]/dose_grid[100,50,100] * 100 * (dose_grid[100,:,100]/dose_grid[100,:,100].max())[50])
+df = pd.read_excel(file_path, sheet_name="Open Field Profiles at 10cm")
+xs = np.arange(-20.1, 20.1, 0.2)
+ax[1, 0].plot(
+    xs,
+    dose_grid[100, 50, :]
+    / dose_grid[100, 50, 100]
+    * 100
+    * (dose_grid[100, :, 100] / dose_grid[100, :, 100].max())[50],
+)
 ax[1, 0].plot(df.iloc[8:, 0], df.iloc[8:, 5] * 0.635)
 ax[1, 0].set_xlim([-10, 10])
 ax[1, 0].set_ylim([0, 110])
 
-df = pd.read_excel(file_path, sheet_name='Open Field Profiles at 20cm')
-xs = np.arange(-20.1, 20.1, .2)
-ax[1, 1].plot(xs, dose_grid[100,100,:]/dose_grid[100,100,100] * 100 * (dose_grid[100,:,100]/dose_grid[100,:,100].max())[100])
+df = pd.read_excel(file_path, sheet_name="Open Field Profiles at 20cm")
+xs = np.arange(-20.1, 20.1, 0.2)
+ax[1, 1].plot(
+    xs,
+    dose_grid[100, 100, :]
+    / dose_grid[100, 100, 100]
+    * 100
+    * (dose_grid[100, :, 100] / dose_grid[100, :, 100].max())[100],
+)
 ax[1, 1].plot(df.iloc[8:, 0], df.iloc[8:, 5] * 0.347)
 ax[1, 1].set_xlim([-10, 10])
 ax[1, 1].set_ylim([0, 110])
 
-df = pd.read_excel(file_path, sheet_name='Open Field Profiles at 30cm')
-xs = np.arange(-20.1, 20.1, .2)
-ax[2, 0].plot(xs, dose_grid[100,150,:]/dose_grid[100,150,100] * 100 * (dose_grid[100,:,100]/dose_grid[100,:,100].max())[150])
+df = pd.read_excel(file_path, sheet_name="Open Field Profiles at 30cm")
+xs = np.arange(-20.1, 20.1, 0.2)
+ax[2, 0].plot(
+    xs,
+    dose_grid[100, 150, :]
+    / dose_grid[100, 150, 100]
+    * 100
+    * (dose_grid[100, :, 100] / dose_grid[100, :, 100].max())[150],
+)
 ax[2, 0].plot(df.iloc[8:, 0], df.iloc[8:, 5] * 0.192)
 ax[2, 0].set_xlim([-10, 10])
 ax[2, 0].set_ylim([0, 110])
 
-df_pdd = pd.read_excel(file_path, sheet_name='Open Field Depth Dose')
+df_pdd = pd.read_excel(file_path, sheet_name="Open Field Depth Dose")
 xs = np.linspace(0, 40, 201) + 0.1
-ax[2, 1].plot(xs, dose_grid[100,:,100]/dose_grid[100,:,100].max() * 100)
+ax[2, 1].plot(xs, dose_grid[100, :, 100] / dose_grid[100, :, 100].max() * 100)
 ax[2, 1].plot(df_pdd.iloc[6:, 0], df_pdd.iloc[6:, 5])
 ax[2, 1].set_xlim([0, 30])
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # %%

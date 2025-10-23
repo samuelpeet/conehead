@@ -12,4 +12,6 @@ class DoseGrid:
         self.num_voxels: npt.NDArray[np.int32] = np.asarray(num_voxels, dtype=np.int32)
         self.corner: npt.NDArray[np.float32] = np.asarray(corner, dtype=np.float32)
         self.resolution: npt.NDArray[np.float32] = np.asarray(resolution, dtype=np.float32)
-        self.dose: npt.NDArray[np.float32] = np.zeros(tuple(self.num_voxels.tolist()), dtype=np.float32)
+        self.dose: npt.NDArray[np.float32] = np.zeros(
+            tuple(self.num_voxels.tolist()), dtype=np.float32
+        )

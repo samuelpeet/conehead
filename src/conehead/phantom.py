@@ -3,7 +3,6 @@ import numpy.typing as npt
 
 
 class SimplePhantom:
-
     def __init__(self):
         # Create simple 40 cm cube water phantom in DICOM coords
 
@@ -11,6 +10,8 @@ class SimplePhantom:
         # _, xlen, ylen, zlen = self.positions.shape
         self.num_voxels: npt.NDArray[np.int32] = np.array([201, 201, 201], dtype=np.int32)
         self.corner: npt.NDArray[np.float32] = np.array([-20.1, 0, -20.1], dtype=np.float32)
-        self.resolution: npt.NDArray[np.float32] = np.array([.2, .2, .2], dtype=np.float32)
-        self.densities: npt.NDArray[np.float32] = np.ones(self.num_voxels, dtype=np.float32)  # Water
+        self.resolution: npt.NDArray[np.float32] = np.array([0.2, 0.2, 0.2], dtype=np.float32)
+        self.densities: npt.NDArray[np.float32] = np.ones(
+            self.num_voxels, dtype=np.float32
+        )  # Water
         # phantom_densities[15:26, 15:26, 15:26] = np.float32(4)  # Higher density feature

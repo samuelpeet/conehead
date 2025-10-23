@@ -3,9 +3,7 @@ import numpy.typing as npt
 
 
 class Source:
-
     def __init__(self, sad: np.float32 = np.float32(100)):
-
         # Initialize source to gantry and collimator zero
         self._sad: np.float32 = sad
         self._gantry: np.float32 = np.float32(0)
@@ -30,12 +28,12 @@ class Source:
         return self._sad
 
     @property
-    def gantry(self) -> np.float32: 
+    def gantry(self) -> np.float32:
         return self._gantry
 
     @gantry.setter
     def gantry(self, theta: np.float32):
-        """ Set the gantry angle of the source.
+        """Set the gantry angle of the source.
 
         Parameters
         ----------
@@ -47,12 +45,12 @@ class Source:
         self._update_geometry()
 
     @property
-    def collimator(self) -> np.float32: 
+    def collimator(self) -> np.float32:
         return self._collimator
 
     @collimator.setter
     def collimator(self, theta: np.float32):
-        """ Set the collimator angle of the source.
+        """Set the collimator angle of the source.
 
         Parameters
         ----------
@@ -64,7 +62,6 @@ class Source:
         self._update_geometry()
 
     def _update_geometry(self):
-
         # Set new source position
         theta = self._gantry
         phi: np.float32 = (np.float32(90) - theta) % np.float32(360)  # IEC 61217
@@ -80,17 +77,13 @@ class Source:
 
         # Rotate basis with new collimator angle
         t = -self._collimator * np.pi / 180
-        r_y = np.array([[np.cos(t), 0, np.sin(t)],
-                        [0, 1, 0],
-                        [-np.sin(t), 0, np.cos(t)]])
+        r_y = np.array([[np.cos(t), 0, np.sin(t)], [0, 1, 0], [-np.sin(t), 0, np.cos(t)]])
         new_v_x = np.matmul(r_y, v_x)
         new_v_z = np.matmul(r_y, v_z)
-        
+
         # Rotate basis with new gantry angle
         p = self._gantry * np.pi / 180
-        r_z = np.array([[np.cos(p), -np.sin(p), 0],
-                        [np.sin(p), np.cos(p), 0],
-                        [0, 0, 1]])
+        r_z = np.array([[np.cos(p), -np.sin(p), 0], [np.sin(p), np.cos(p), 0], [0, 0, 1]])
         self.v_x = np.matmul(r_z, new_v_x)
         self.v_y = np.matmul(r_z, v_y)
         self.v_z = np.matmul(r_z, new_v_z)
