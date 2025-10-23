@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import toml
 import math
 from importlib.resources import files
-import pycuda.driver as cuda
+import pycuda.driver as cuda 
 import pycuda.autoinit
 import shutil
 from scipy.optimize import minimize
@@ -61,41 +61,30 @@ kernel_thetas = np.linspace(0, 360 - (360 / 16), 16, dtype=np.float32)  # 16 the
 kernel = kernel / len(kernel_thetas)  # account for theta sampling
 kernel_omegas = (kernels[0].omegas / len(kernel_thetas)).astype(np.float32)
 
-## %%
-# Build kernel bank across water-equivalent depth T in [-50, +50] cm, step 1 cm.
-# This does not alter the current pipeline; it prepares `kernel_bank` for later use.
-# Convention: each banked kernel is normalized to sum to 1 over all (phi, depth) bins,
-# consistent with the current single collapsed kernel usage.
-# Water-equivalent depth grid (cm)
-kernel_bank_T_cm = np.arange(-50.0, 51.0, 1.0, dtype=np.float32)  # [-50, -49, ..., 50]
-# Stack monoenergetic kernels: shape (nE, nPhi, nDepth)
-kernels_stack = np.stack([k.kernel for k in kernels]).astype(np.float32)
-nE, nPhi, nDepth = kernels_stack.shape
-# Base normalized spectrum weights (shape nE) from settings
-energies_arr = np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)
-w0 = np.array(settings["energy_spectrum"]["weights"], dtype=np.float32).astype(np.float32)
-w0 = w0 / w0.sum()
-# Compute water attenuation coefficients for these energies
-mu_w_arr = mu_water(energies_arr).astype(np.float32)
-# Compute weights for each T: W[T, e] = w0[e] * exp(-mu_w[e] * T), then normalize across energies
-W = w0[None, :] * np.exp(-mu_w_arr[None, :] * kernel_bank_T_cm[:, None]).astype(np.float32)
-W = W / W.sum(axis=1, keepdims=True)
-# Mix kernels across energies for each T: result shape (nT, nPhi, nDepth)
-kernel_bank = (W @ kernels_stack.reshape(nE, -1)).reshape(len(kernel_bank_T_cm), nPhi, nDepth)
-# Normalize each kernel in the bank to sum to 1 (keeps behavior consistent with current code)
-kernel_bank = kernel_bank / kernel_bank.reshape(len(kernel_bank_T_cm), -1).sum(axis=1)[:, None, None]
-# Optional: quick sanity print (commented to keep output clean)
-# print(f"Kernel bank built: T bins = {len(kernel_bank_T_cm)}, shape per kernel = ({nPhi}, {nDepth})")
-
-# beam_profile_correction_oads = np.array(settings["beam_profile_correction"]["oads"], dtype=np.float32)
-# beam_profile_correction_fs = np.array(settings["beam_profile_correction"]["factors"], dtype=np.float32)
-# beam_profile_correction_oads_interp = np.linspace(beam_profile_correction_oads[0], beam_profile_correction_oads[-1], 1001, dtype=np.float32)
-# beam_profile_correction_fs_interp = np.interp(  # Resample to high res for indexing into later
-#     beam_profile_correction_oads_interp,
-#     beam_profile_correction_oads,
-#     beam_profile_correction_fs,
-# ).astype(np.float32)
-# beam_profile_correction_dx = beam_profile_correction_oads_interp[1] - beam_profile_correction_oads_interp[0]
+# # Build kernel bank across water-equivalent depth T in [-50, +50] cm, step 1 cm.
+# # This does not alter the current pipeline; it prepares `kernel_bank` for later use.
+# # Convention: each banked kernel is normalized to sum to 1 over all (phi, depth) bins,
+# # consistent with the current single collapsed kernel usage.
+# # Water-equivalent depth grid (cm)
+# kernel_bank_T_cm = np.arange(-50.0, 51.0, 1.0, dtype=np.float32)  # [-50, -49, ..., 50]
+# # Stack monoenergetic kernels: shape (nE, nPhi, nDepth)
+# kernels_stack = np.stack([k.kernel for k in kernels]).astype(np.float32)
+# nE, nPhi, nDepth = kernels_stack.shape
+# # Base normalized spectrum weights (shape nE) from settings
+# energies_arr = np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)
+# w0 = np.array(settings["energy_spectrum"]["weights"], dtype=np.float32).astype(np.float32)
+# w0 = w0 / w0.sum()
+# # Compute water attenuation coefficients for these energies
+# mu_w_arr = mu_water(energies_arr).astype(np.float32)
+# # Compute weights for each T: W[T, e] = w0[e] * exp(-mu_w[e] * T), then normalize across energies
+# W = w0[None, :] * np.exp(-mu_w_arr[None, :] * kernel_bank_T_cm[:, None]).astype(np.float32)
+# W = W / W.sum(axis=1, keepdims=True)
+# # Mix kernels across energies for each T: result shape (nT, nPhi, nDepth)
+# kernel_bank = (W @ kernels_stack.reshape(nE, -1)).reshape(len(kernel_bank_T_cm), nPhi, nDepth)
+# # Normalize each kernel in the bank to sum to 1 (keeps behavior consistent with current code)
+# kernel_bank = kernel_bank / kernel_bank.reshape(len(kernel_bank_T_cm), -1).sum(axis=1)[:, None, None]
+# # Optional: quick sanity print (commented to keep output clean)
+# # print(f"Kernel bank built: T bins = {len(kernel_bank_T_cm)}, shape per kernel = ({nPhi}, {nDepth})")
 
 off_axis_softening_oads = np.array(settings["off_axis_softening"]["oads"], dtype=np.float32)
 off_axis_softening_fs = np.array(settings["off_axis_softening"]["factors"], dtype=np.float32)
@@ -205,7 +194,6 @@ cuda_code = open(files("conehead").joinpath("conehead.cu")).read()
 mod = SourceModule(cuda_code)
 
 # Extract kernel functions
-hit_test = mod.get_function("hit_test")
 oad = mod.get_function("oad")
 d_geo = mod.get_function("d_geo")
 d_eff = mod.get_function("d_eff")
@@ -213,8 +201,6 @@ fluence = mod.get_function("fluence")
 terma = mod.get_function("terma")
 mask = mod.get_function("mask")
 dose = mod.get_function("dose")
-dose_banked = mod.get_function("dose_banked")
-# active_dose = mod.get_function("active_dose")
 
 # Define grid/block sizes
 threadsperblock = (16, 4, 4)
