@@ -33,11 +33,11 @@ __device__ float dot(float3 a, float3 b)
  *       the plane from ray_start before calling or extend the API to include a plane offset.
  *       Caller must decide how to handle a false result (skip sample, use a default, etc.).
  */
-__device__ bool line_plane_collision(float3 *out_pos_plane,
-                                     float3 ray_start,
-                                     float3 ray_direction,
-                                     float3 plane_normal,
-                                     float epsilon)
+__device__ bool line_plane_collision(float3* out_pos_plane,
+    float3 ray_start,
+    float3 ray_direction,
+    float3 plane_normal,
+    float epsilon)
 {
     float ndotu = dot(plane_normal, ray_direction);
     if (fabsf(ndotu) < epsilon) {
@@ -67,7 +67,7 @@ __device__ bool line_plane_collision(float3 *out_pos_plane,
  * @param fluence_map Flattened float array of length 560*560 (row-major).
  * @return Fluence value at the mapped location, or 0.0f if outside bounds.
  */
-__device__ float fluence_map_lookup(float2 position, float *fluence_map)
+__device__ float fluence_map_lookup(float2 position, float* fluence_map)
 {
     float pos_x = floor(position.x * 10); // Convert to mm
     float pos_y = floor(position.y * 10); // Convert to mm
@@ -75,12 +75,11 @@ __device__ float fluence_map_lookup(float2 position, float *fluence_map)
     pos_x = pos_x + 280;
     pos_y = pos_y + 280;
 
-    int ix = (int)(pos_x) - 1;
-    int iy = (int)(pos_y) - 1;
+    int ix = (int)(pos_x)-1;
+    int iy = (int)(pos_y)-1;
 
     // Handle position lying outside the defined blocking area
-    if (ix < 0 || ix > 559 || iy < 0 || iy > 559)
-    {
+    if (ix < 0 || ix > 559 || iy < 0 || iy > 559) {
         return 0;
     }
 
@@ -107,14 +106,14 @@ __device__ float fluence_map_lookup(float2 position, float *fluence_map)
  * @param source_v_y     Device pointer to float[3] source local y axis (plane normal).
  * @param source_v_z     Device pointer to float[3] source local z axis.
  */
-__global__ void oad(float *oad_grid,
-                    int *num_voxels,
-                    float *corner,
-                    float *resolution,
-                    float *source_position,
-                    float *source_v_x,
-                    float *source_v_y,
-                    float *source_v_z)
+__global__ void oad(float* oad_grid,
+    int* num_voxels,
+    float* corner,
+    float* resolution,
+    float* source_position,
+    float* source_v_x,
+    float* source_v_y,
+    float* source_v_z)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -124,8 +123,7 @@ __global__ void oad(float *oad_grid,
     int ny = num_voxels[1];
     int nz = num_voxels[2];
 
-    if (x < nx && y < ny && z < nz)
-    {
+    if (x < nx && y < ny && z < nz) {
         float3 corner_f3 = make_float3(corner[0], corner[1], corner[2]);
         float3 resolution_f3 = make_float3(resolution[0], resolution[1], resolution[2]);
         float3 source_position_f3 = make_float3(source_position[0], source_position[1], source_position[2]);
@@ -157,7 +155,7 @@ __global__ void oad(float *oad_grid,
         int idx = x + y * nx + z * nx * ny;
         oad_grid[idx] = sqrt(pos_source_f3.x * pos_source_f3.x + pos_source_f3.z * pos_source_f3.z);
     }
-}           
+}
 
 /**
  * @brief Compute geometric distance from the source to each voxel centre.
@@ -172,11 +170,11 @@ __global__ void oad(float *oad_grid,
  * @param resolution     Device pointer to float[3] voxel sizes (dx, dy, dz).
  * @param source_position Device pointer to float[3] source position in world coordinates.
  */
-__global__ void d_geo(float *d_geo_grid,
-                      int *num_voxels,
-                      float *corner,
-                      float *resolution,
-                      float *source_position)
+__global__ void d_geo(float* d_geo_grid,
+    int* num_voxels,
+    float* corner,
+    float* resolution,
+    float* source_position)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -186,8 +184,7 @@ __global__ void d_geo(float *d_geo_grid,
     int ny = num_voxels[1];
     int nz = num_voxels[2];
 
-    if (x < nx && y < ny && z < nz)
-    {
+    if (x < nx && y < ny && z < nz) {
         float3 corner_f3 = make_float3(corner[0], corner[1], corner[2]);
         float3 resolution_f3 = make_float3(resolution[0], resolution[1], resolution[2]);
         float3 source_position_f3 = make_float3(source_position[0], source_position[1], source_position[2]);
@@ -227,12 +224,12 @@ __global__ void d_geo(float *d_geo_grid,
  * @param density_grid   Device pointer to flattened density grid co-located with voxels.
  * @param source_position Device pointer to float[3] source position in world coordinates.
  */
-__global__ void d_eff(float *d_eff_grid,
-                      int *num_voxels,
-                      float *corner,
-                      float *resolution,
-                      float *density_grid,
-                      float *source_position)
+__global__ void d_eff(float* d_eff_grid,
+    int* num_voxels,
+    float* corner,
+    float* resolution,
+    float* density_grid,
+    float* source_position)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -242,8 +239,7 @@ __global__ void d_eff(float *d_eff_grid,
     int ny = num_voxels[1];
     int nz = num_voxels[2];
 
-    if (x < nx && y < ny && z < nz)
-    {
+    if (x < nx && y < ny && z < nz) {
         float3 corner_f3 = make_float3(corner[0], corner[1], corner[2]);
         float3 resolution_f3 = make_float3(resolution[0], resolution[1], resolution[2]);
         float3 source_position_f3 = make_float3(source_position[0], source_position[1], source_position[2]);
@@ -270,8 +266,7 @@ __global__ void d_eff(float *d_eff_grid,
         int steps = (int)(total_distance / ds);
         float acc = 0;
 
-        for (int i = 0; i < steps; i++)
-        {
+        for (int i = 0; i < steps; i++) {
             // Move a step toward source
             position_f3.x += ray_direction_f3.x * ds;
             position_f3.y += ray_direction_f3.y * ds;
@@ -282,9 +277,8 @@ __global__ void d_eff(float *d_eff_grid,
             int iy = (int)((position_f3.y - corner_f3.y) / resolution_f3.y);
             int iz = (int)((position_f3.z - corner_f3.z) / resolution_f3.z);
 
-            if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || iz < 0 || iz >= nz)
-            {
-                break;  // Ray left grid
+            if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || iz < 0 || iz >= nz) {
+                break; // Ray left grid
             }
 
             // Accumulate density
@@ -333,21 +327,21 @@ __global__ void d_eff(float *d_eff_grid,
  * The kernel averages over samples^3 sub-voxels. Each sample contributes
  * fluence_map_lookup(...) / (samples*samples*samples) to the accumulated fluence.
  */
-__global__ void fluence(float *fluence_grid,
-                        float *fluence_map_pri,
-                        float *fluence_map_sec,
-                        int *num_voxels,
-                        float *corner,
-                        float *resolution,
-                        float *d_geo_grid,
-                        float *source_position,
-                        float *source_v_x,
-                        float *source_v_y,
-                        float *source_v_z,
-                        float source_sad,
-                        float pri_s, float pri_x, float pri_y, float pri_z,
-                        float sec_s, float sec_x, float sec_y, float sec_z,
-                        int samples)
+__global__ void fluence(float* fluence_grid,
+    float* fluence_map_pri,
+    float* fluence_map_sec,
+    int* num_voxels,
+    float* corner,
+    float* resolution,
+    float* d_geo_grid,
+    float* source_position,
+    float* source_v_x,
+    float* source_v_y,
+    float* source_v_z,
+    float source_sad,
+    float pri_s, float pri_x, float pri_y, float pri_z,
+    float sec_s, float sec_x, float sec_y, float sec_z,
+    int samples)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -357,8 +351,7 @@ __global__ void fluence(float *fluence_grid,
     int ny = num_voxels[1];
     int nz = num_voxels[2];
 
-    if (x < nx && y < ny && z < nz)
-    {
+    if (x < nx && y < ny && z < nz) {
 
         float3 corner_f3 = make_float3(corner[0], corner[1], corner[2]);
         float3 resolution_f3 = make_float3(resolution[0], resolution[1], resolution[2]);
@@ -386,12 +379,9 @@ __global__ void fluence(float *fluence_grid,
 
         float fluence_pri = 0;
         float fluence_sec = 0;
-        for (int ix = 0; ix < samples; ix++)
-        {
-            for (int iy = 0; iy < samples; iy++)
-            {
-                for (int iz = 0; iz < samples; iz++)
-                {
+        for (int ix = 0; ix < samples; ix++) {
+            for (int iy = 0; iy < samples; iy++) {
+                for (int iz = 0; iz < samples; iz++) {
                     // Position of sample
                     pos_sample_f3.x = position_f3.x + offset_f3.x / 2 + offset_f3.x * ix;
                     pos_sample_f3.y = position_f3.y + offset_f3.y / 2 + offset_f3.y * iy;
@@ -413,8 +403,8 @@ __global__ void fluence(float *fluence_grid,
                     pos_fluence_map_2d_f2.y = pos_fluence_map_f3.z;
 
                     // Accumulate fluence from primary and secondary sources
-                    fluence_pri = fluence_pri + fluence_map_lookup(pos_fluence_map_2d_f2, fluence_map_pri) / (samples*samples*samples);
-                    fluence_sec = fluence_sec + fluence_map_lookup(pos_fluence_map_2d_f2, fluence_map_sec) / (samples*samples*samples);
+                    fluence_pri = fluence_pri + fluence_map_lookup(pos_fluence_map_2d_f2, fluence_map_pri) / (samples * samples * samples);
+                    fluence_sec = fluence_sec + fluence_map_lookup(pos_fluence_map_2d_f2, fluence_map_sec) / (samples * samples * samples);
                 }
             }
         }
@@ -461,19 +451,19 @@ __global__ void fluence(float *fluence_grid,
  * - Off-axis softening is not yet applied (there is a commented-out block showing planned use of oad_grid
  *   and off_axis_softening_fs_interp). Implementing that will modify per-bin energy_weights before summation.
  */
-__global__ void terma(float *terma_grid,
-                      float *fluence_grid,
-                      float *d_geo_grid,
-                      float *d_eff_grid,
-                      int *num_voxels,
-                      int num_energies,
-                      float *energy,
-                      float *energy_weights,
-                      float *mu_w,
-                      float source_sad,
-                      float *oad_grid,
-                      float *off_axis_softening_fs_interp,
-                      float off_axis_softening_dx)
+__global__ void terma(float* terma_grid,
+    float* fluence_grid,
+    float* d_geo_grid,
+    float* d_eff_grid,
+    int* num_voxels,
+    int num_energies,
+    float* energy,
+    float* energy_weights,
+    float* mu_w,
+    float source_sad,
+    float* oad_grid,
+    float* off_axis_softening_fs_interp,
+    float off_axis_softening_dx)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -483,8 +473,7 @@ __global__ void terma(float *terma_grid,
     int ny = num_voxels[1];
     int nz = num_voxels[2];
 
-    if (x < nx && y < ny && z < nz)
-    {
+    if (x < nx && y < ny && z < nz) {
         int idx = x + y * nx + z * nx * ny;
 
         // float oad = oad_grid[idx];
@@ -507,11 +496,8 @@ __global__ void terma(float *terma_grid,
         // }
 
         float terma = 0;
-        for (int i = 0; i < num_energies; i++)
-        {
-            terma += energy_weights[i] * fluence_grid[idx] * exp(
-                -mu_w[i] * (d_eff_grid[idx])
-            ) * mu_w[i] * energy[i];
+        for (int i = 0; i < num_energies; i++) {
+            terma += energy_weights[i] * fluence_grid[idx] * exp(-mu_w[i] * (d_eff_grid[idx])) * mu_w[i] * energy[i];
         }
         float no_tilt_descaling = (d_geo_grid[idx] / source_sad) * (d_geo_grid[idx] / source_sad);
         terma_grid[idx] = terma * no_tilt_descaling;
@@ -535,12 +521,12 @@ __global__ void terma(float *terma_grid,
  * @param max_distance_cm        Physical search radius (cm) used to determine neighborhood.
  * @param terma_threshold        TERMA threshold; any neighbor with terma >= this marks the voxel as active.
  */
-__global__ void mask(float *mask_grid, 
-                     float *terma_grid,
-                     int *num_voxels,
-                     float *resolution,
-                     float max_distance_cm,
-                     float terma_threshold)
+__global__ void mask(float* mask_grid,
+    float* terma_grid,
+    int* num_voxels,
+    float* resolution,
+    float max_distance_cm,
+    float terma_threshold)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -552,31 +538,23 @@ __global__ void mask(float *mask_grid,
 
     int max_voxels_distance = (int)(max_distance_cm / fmin(resolution[0], fmin(resolution[1], resolution[2])));
 
-    if (x < nx && y < ny && z < nz)
-    {
+    if (x < nx && y < ny && z < nz) {
         int idx = x + y * nx + z * nx * ny;
 
         // We check 8 directions (±x, ±y, ±z)
-        for (int ix = -1; ix <= 1; ix = ix + 2)  // Just alternate from negative to positive 1
+        for (int ix = -1; ix <= 1; ix = ix + 2) // Just alternate from negative to positive 1
         {
-            for (int iy = -1; iy <= 1; iy = iy + 2)
-            {
-                for (int iz = -1; iz <= 1; iz = iz + 2)
-                {
-                    for (int v = 0; v <= max_voxels_distance; v++)
-                    {
+            for (int iy = -1; iy <= 1; iy = iy + 2) {
+                for (int iz = -1; iz <= 1; iz = iz + 2) {
+                    for (int v = 0; v <= max_voxels_distance; v++) {
                         int cx = x + ix * v;
                         int cy = y + iy * v;
                         int cz = z + iz * v;
 
                         // Ensure neighbor indices are within bounds
-                        if (cx >= 0 && cx < nx &&
-                            cy >= 0 && cy < ny &&
-                            cz >= 0 && cz < nz)
-                        {
+                        if (cx >= 0 && cx < nx && cy >= 0 && cy < ny && cz >= 0 && cz < nz) {
                             int n_idx = cx + cy * nx + cz * nx * ny;
-                            if (terma_grid[n_idx] >= terma_threshold)
-                            {
+                            if (terma_grid[n_idx] >= terma_threshold) {
                                 mask_grid[idx] = 1.0f;
                                 return;
                             }
@@ -585,7 +563,7 @@ __global__ void mask(float *mask_grid,
                 }
             }
         }
-        mask_grid[idx] = 0.0f;  // No neighbors within threshold
+        mask_grid[idx] = 0.0f; // No neighbors within threshold
     }
 }
 
@@ -653,27 +631,27 @@ __global__ void mask(float *mask_grid,
  * @param max_kernel_depth_cm    Maximum kernel depth to march (cm).
  * @param ds_cm                  Ray-marching step size (cm).
  */
-__global__ void dose(float *dose_grid, 
-                     float *resolution,
-                     int *num_voxels,
-                     float *corner,
-                     float *density_grid,
-                     float *d_geo_grid,
-                     float *terma_grid,
-                     float *mask_grid,
-                     float *kernel_thetas,
-                     float *kernel_phis,
-                     float *kernel_omegas,
-                     float *kernel,
-                     float source_sad,
-                     float *source_position,
-                     float *source_v_x,
-                     float *source_v_y,
-                     float *source_v_z,
-                     int n_depth_bins,
-                     float kernel_depth_res_cm,
-                     float max_kernel_depth_cm,
-                     float ds_cm)
+__global__ void dose(float* dose_grid,
+    float* resolution,
+    int* num_voxels,
+    float* corner,
+    float* density_grid,
+    float* d_geo_grid,
+    float* terma_grid,
+    float* mask_grid,
+    float* kernel_thetas,
+    float* kernel_phis,
+    float* kernel_omegas,
+    float* kernel,
+    float source_sad,
+    float* source_position,
+    float* source_v_x,
+    float* source_v_y,
+    float* source_v_z,
+    int n_depth_bins,
+    float kernel_depth_res_cm,
+    float max_kernel_depth_cm,
+    float ds_cm)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -685,16 +663,14 @@ __global__ void dose(float *dose_grid,
 
     int idx = x + y * nx + z * nx * ny;
 
-    if (x >= nx || y >= ny || z >= nz)
-    {
+    if (x >= nx || y >= ny || z >= nz) {
         return;
     }
 
-    if (mask_grid[idx] == 0.0f)
-    {
+    if (mask_grid[idx] == 0.0f) {
         // Skip convolution for this voxel
         dose_grid[idx] = terma_grid[idx];
-        return;  
+        return;
     }
 
     // Voxel geometry
@@ -703,8 +679,7 @@ __global__ void dose(float *dose_grid,
     float3 centre_f3 = make_float3(
         corner_f3.x + resolution_f3.x * (x + 0.5),
         corner_f3.y + resolution_f3.y * (y + 0.5),
-        corner_f3.z + resolution_f3.z * (z + 0.5)
-    );
+        corner_f3.z + resolution_f3.z * (z + 0.5));
 
     // Precompute trigonometric values for all thetas and phis
     const int n_thetas = 16;
@@ -715,14 +690,12 @@ __global__ void dose(float *dose_grid,
     float s_t_arr[n_thetas];
     float c_p_arr[n_phis];
     float s_p_arr[n_phis];
-    for (int it = 0; it < n_thetas; it++)
-    {
+    for (int it = 0; it < n_thetas; it++) {
         theta_rad_arr[it] = kernel_thetas[it] * 3.141592653589793 / 180.0;
         c_t_arr[it] = cos(theta_rad_arr[it]);
         s_t_arr[it] = sin(theta_rad_arr[it]);
     }
-    for (int ip = 0; ip < n_phis; ip++)
-    {
+    for (int ip = 0; ip < n_phis; ip++) {
         phi_rad_arr[ip] = (kernel_phis[ip] - 180.0) * 3.141592653589793 / 180.0;
         c_p_arr[ip] = cos(phi_rad_arr[ip]);
         s_p_arr[ip] = sin(phi_rad_arr[ip]);
@@ -733,10 +706,8 @@ __global__ void dose(float *dose_grid,
     float3 position_f3 = make_float3(0.0f, 0.0f, 0.0f);
     float dose_acc = 0.0f;
 
-    for (int it = 0; it < n_thetas; it++)
-    {
-        for (int ip = 0; ip < n_phis; ip++)
-        {
+    for (int it = 0; it < n_thetas; it++) {
+        for (int ip = 0; ip < n_phis; ip++) {
             float s = 0.0f;
             float rad_depth = 0.0f;
             int max_steps = (int)(max_kernel_depth_cm / ds_cm);
@@ -751,17 +722,13 @@ __global__ void dose(float *dose_grid,
             direction_f3.y = c_p_arr[ip];
             direction_f3.z = s_t_arr[it] * s_p_arr[ip];
             float mag = sqrt(
-                direction_f3.x * direction_f3.x +
-                direction_f3.y * direction_f3.y +
-                direction_f3.z * direction_f3.z
-            );
+                direction_f3.x * direction_f3.x + direction_f3.y * direction_f3.y + direction_f3.z * direction_f3.z);
             direction_f3.x /= mag;
             direction_f3.y /= mag;
             direction_f3.z /= mag;
 
             // We have direction and starting position; time to march along ray
-            for (int step = 0; step < max_steps; step++)
-            {
+            for (int step = 0; step < max_steps; step++) {
                 // Advance a step
                 position_f3.x += direction_f3.x * ds_cm;
                 position_f3.y += direction_f3.y * ds_cm;
@@ -773,24 +740,21 @@ __global__ void dose(float *dose_grid,
                 int iy = (int)((position_f3.y - corner_f3.y) / resolution_f3.y);
                 int iz = (int)((position_f3.z - corner_f3.z) / resolution_f3.z);
                 int idx2 = ix + iy * nx + iz * nx * ny;
-                if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || iz < 0 || iz >= nz)
-                {
-                    break;  // Ray left grid
+                if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || iz < 0 || iz >= nz) {
+                    break; // Ray left grid
                 }
                 // Accumulate radiological depth
                 rad_depth += density_grid[idx2] * ds_cm;
 
                 // Lookup kernel value corresponding to this radiological depth
                 int depth_idx = (int)(rad_depth / kernel_depth_res_cm);
-                if (depth_idx >= n_depth_bins)
-                {
-                    break;  // Beyond end of kernel
+                if (depth_idx >= n_depth_bins) {
+                    break; // Beyond end of kernel
                 }
                 float kernel_value = kernel[ip * n_depth_bins + depth_idx];
                 float vol = kernel_omegas[ip] * ds_cm * s * s; // Volume of sample sector
                 dose_acc += terma_grid[idx2] * kernel_value * vol;
-                if (s >= max_kernel_depth_cm)
-                {
+                if (s >= max_kernel_depth_cm) {
                     break;
                 }
             }
