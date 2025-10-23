@@ -6,13 +6,6 @@ class Source:
 
     def __init__(self, sad: np.float32 = np.float32(100)):
 
-        # if model == "varian_clinac_6MV":
-        #     import conehead.varian_clinac_6MV
-        #     self.weights = conehead.varian_clinac_6MV.weights_ali
-        # else:
-        #     raise NotImplementedError("The requested model is not yet"
-        #                               " implemented.")
-
         # Initialize source to gantry and collimator zero
         self._sad: np.float32 = sad
         self._gantry: np.float32 = np.float32(0)
@@ -23,10 +16,6 @@ class Source:
         self.v_x: npt.NDArray[np.float32] = np.array([1, 0, 0], dtype=np.float32)
         self.v_y: npt.NDArray[np.float32] = np.array([0, 1, 0], dtype=np.float32)
         self.v_z: npt.NDArray[np.float32] = np.array([0, 0, 1], dtype=np.float32)
-        
-        # Create rotation matrix to transform from world coords to local source coords
-        self.transform: npt.NDArray[np.float32] = np.array([self.v_x, self.v_y, self.v_z]).transpose()
-        self.transform = np.linalg.inv(self.transform)
 
     @property
     def position(self) -> npt.NDArray[np.float32]:
@@ -105,7 +94,3 @@ class Source:
         self.v_x = np.matmul(r_z, new_v_x)
         self.v_y = np.matmul(r_z, v_y)
         self.v_z = np.matmul(r_z, new_v_z)
-
-        # Update transformation matrix
-        self.transform: npt.NDArray[np.float32] = np.array([self.v_x, self.v_y, self.v_z]).transpose()
-        self.transform = np.linalg.inv(self.transform)
