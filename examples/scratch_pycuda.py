@@ -205,7 +205,7 @@ kernel_thetas_gpu = cuda.mem_alloc(kernel_thetas.nbytes)
 kernel_phis_c_gpu = cuda.mem_alloc(kernel_phis_c.nbytes)
 kernel_omegas_gpu = cuda.mem_alloc(kernel_omegas.nbytes)
 kernel_gpu = cuda.mem_alloc(kernel.nbytes)
-kernel_bank_gpu = cuda.mem_alloc(kernel_bank.nbytes)
+# kernel_bank_gpu = cuda.mem_alloc(kernel_bank.nbytes)
 
 
 # Compile the CUDA kernel
