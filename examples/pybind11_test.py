@@ -8,6 +8,8 @@ import toml
 from importlib.resources import files
 from conehead.kernel import KernelMono
 from conehead.nist import mu_water
+from conehead.source import Source
+from conehead.phantom import SimplePhantom
 
 sys.path.append(os.path.join(os.getcwd(), "../build/"))
 import conehead_gpu as gpu
@@ -35,28 +37,30 @@ oads = np.array([0.0, 40.0], dtype=np.float32)
 off_axis_softening_fs_interp = np.array([0.0, 0.0], dtype=np.float32)
 mu_w = mu_water(energies)
 
-num_voxels = np.array([301, 301, 301], dtype=np.int32)
-corner = np.array([-30.1, 0, -30.1], dtype=np.float32)
-resolution = np.array([0.2, 0.2, 0.2], dtype=np.float32)
-source_position = np.array([0.0, -100.0, 0.0], dtype=np.float32)
-source_v_x = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-source_v_y = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-source_v_z = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+# num_voxels = np.array([201, 201, 201], dtype=np.int32)
+# corner = np.array([-20.1, 0.0, -20.1], dtype=np.float32)
+# resolution = np.array([0.2, 0.2, 0.2], dtype=np.float32)
+# source.position = np.array([0.0, -100.0, 0.0], dtype=np.float32)
+# source.v_x = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+# source.v_y = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+# source.v_z = np.array([0.0, 0.0, 1.0], dtype=np.float32)
 
-oad_grid = np.zeros(num_voxels, dtype=np.float32)
-d_geo_grid = np.zeros(num_voxels, dtype=np.float32)
-d_eff_grid = np.zeros(num_voxels, dtype=np.float32)
-density_grid = np.ones(num_voxels, dtype=np.float32) * 1.0  # g/cm3
-fluence_grid = np.zeros(num_voxels, dtype=np.float32)
+phantom = SimplePhantom()
+
+oad_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
+d_geo_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
+d_eff_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
+density_grid = phantom.densities
+fluence_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
 fluence_map_pri = np.zeros((560, 560), dtype=np.float32) * pri_s
-fluence_map_pri[100:460, 100:460] = 1.0
+fluence_map_pri[200:360, 200:360] = 1.0
 fluence_map_pri = gaussian_filter(fluence_map_pri, sigma=(2, 2), mode="nearest")
 fluence_map_sec = np.zeros((560, 560), dtype=np.float32) * sec_s
-fluence_map_sec[100:460, 100:460] = 1.0
+fluence_map_sec[200:360, 200:360] = 1.0
 fluence_map_sec = gaussian_filter(fluence_map_sec, sigma=(50, 50), mode="nearest")
-terma_grid = np.zeros(num_voxels, dtype=np.float32)
-mask_grid = np.zeros(num_voxels, dtype=np.float32)
-dose_grid = np.zeros(num_voxels, dtype=np.float32)
+terma_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
+mask_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
+dose_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
 
 kernels = [
     KernelMono(files("conehead.kernels").joinpath("0.5MeV/0.5MeV.egslst")),
@@ -87,65 +91,85 @@ kernel_thetas = np.linspace(0, 360 - (360 / 16), 16, dtype=np.float32)  # 16 the
 kernel = kernel / len(kernel_thetas)  # account for theta sampling
 kernel_omegas = (kernels[0].omegas / len(kernel_thetas)).astype(np.float32)
 
+source = Source()
+source.gantry = 45
 
-runs = 10
+
+# d_geo_grid_py = np.zeros(phantom.num_voxels, dtype=np.float32)
+# for i in range(phantom.num_voxels[0]):
+#     for j in range(phantom.num_voxels[1]):
+#         for k in range(phantom.num_voxels[2]):
+#             pos_x = phantom.corner[0] + i * phantom.resolution[0] + phantom.resolution[0] / 2
+#             pos_y = phantom.corner[1] + j * phantom.resolution[1] + phantom.resolution[1] / 2
+#             pos_z = phantom.corner[2] + k * phantom.resolution[2] + phantom.resolution[2] / 2
+#             voxel_pos = np.array([pos_x, pos_y, pos_z], dtype=np.float32)
+#             vec_source_to_voxel = voxel_pos - source.position
+#             distance = np.sqrt(
+#                 vec_source_to_voxel[0] ** 2
+#                 + vec_source_to_voxel[1] ** 2
+#                 + vec_source_to_voxel[2] ** 2
+#             )
+#             d_geo_grid_py[i, j, k] = distance
+
+
+runs = 1
 t0 = time.time()
 for _ in range(runs):
     gpu.oad(
         oad_grid=oad_grid,
-        num_voxels=num_voxels,
-        corner=corner,
-        resolution=resolution,
-        source_position=source_position,
-        source_v_x=source_v_x,
-        source_v_y=source_v_y,
-        source_v_z=source_v_z,
+        num_voxels=phantom.num_voxels,
+        corner=phantom.corner,
+        resolution=phantom.resolution,
+        source_position=source.position,
+        source_v_x=source.v_x,
+        source_v_y=source.v_y,
+        source_v_z=source.v_z,
     )
 print("oad time: " + str((time.time() - t0) / runs) + " s")
 
 
-runs = 10
+runs = 1
 t0 = time.time()
 for _ in range(runs):
     gpu.d_geo(
         d_geo_grid=d_geo_grid,
-        num_voxels=num_voxels,
-        corner=corner,
-        resolution=resolution,
-        source_position=source_position,
+        num_voxels=phantom.num_voxels,
+        corner=phantom.corner,
+        resolution=phantom.resolution,
+        source_position=source.position,
     )
 print("d_geo time: " + str((time.time() - t0) / runs) + " s")
 
 
-runs = 10
+runs = 1
 t0 = time.time()
 for _ in range(runs):
     gpu.d_eff(
         d_eff_grid=d_eff_grid,
-        num_voxels=num_voxels,
-        corner=corner,
-        resolution=resolution,
+        num_voxels=phantom.num_voxels,
+        corner=phantom.corner,
+        resolution=phantom.resolution,
         density_grid=density_grid,
-        source_position=source_position,
+        source_position=source.position,
     )
 print("d_eff time: " + str((time.time() - t0) / runs) + " s")
 
 
-runs = 10
+runs = 1
 t0 = time.time()
 for _ in range(runs):
     gpu.fluence(
         fluence_grid=fluence_grid,
         fluence_map_pri=fluence_map_pri,
         fluence_map_sec=fluence_map_sec,
-        num_voxels=num_voxels,
-        corner=corner,
-        resolution=resolution,
+        num_voxels=phantom.num_voxels,
+        corner=phantom.corner,
+        resolution=phantom.resolution,
         d_geo_grid=d_geo_grid,
-        source_position=source_position,
-        source_v_x=source_v_x,
-        source_v_y=source_v_y,
-        source_v_z=source_v_z,
+        source_position=source.position,
+        source_v_x=source.v_x,
+        source_v_y=source.v_y,
+        source_v_z=source.v_z,
         source_sad=source_sad,
         pri_s=pri_s,
         pri_x=pri_x,
@@ -160,7 +184,7 @@ for _ in range(runs):
 print("fluence time: " + str((time.time() - t0) / runs) + " s")
 
 
-runs = 10
+runs = 1
 t0 = time.time()
 for _ in range(runs):
     gpu.terma(
@@ -168,7 +192,7 @@ for _ in range(runs):
         fluence_grid=fluence_grid,
         d_geo_grid=d_geo_grid,
         d_eff_grid=d_eff_grid,
-        num_voxels=num_voxels,
+        num_voxels=phantom.num_voxels,
         num_energies=np.int32(len(energies)),
         energies=energies,
         energy_weights=energy_weights,
@@ -181,31 +205,31 @@ for _ in range(runs):
 print("terma time: " + str((time.time() - t0) / runs) + " s")
 
 
-runs = 10
+runs = 1
 t0 = time.time()
 for _ in range(runs):
     gpu.mask(
         mask_grid=mask_grid,
         terma_grid=terma_grid,
-        num_voxels=num_voxels,
-        resolution=resolution,
+        num_voxels=phantom.num_voxels,
+        resolution=phantom.resolution,
         max_distance_cm=mask_max_distance,
         terma_threshold=mask_terma_threshold * terma_grid.max(),
     )
 print("mask time: " + str((time.time() - t0) / runs) + " s")
 
 
-# mask_grid = np.ones_like(mask_grid, dtype=np.float32)  # for testing dose without mask
+mask_grid = np.ones_like(mask_grid, dtype=np.float32)  # for testing dose without mask
 
 
-runs = 3
+runs = 1
 t0 = time.time()
 for _ in range(runs):
     gpu.dose(
         dose_grid=dose_grid,
-        resolution=resolution,
-        num_voxels=num_voxels,
-        corner=corner,
+        resolution=phantom.resolution,
+        num_voxels=phantom.num_voxels,
+        corner=phantom.corner,
         density_grid=density_grid,
         d_geo_grid=d_geo_grid,
         terma_grid=terma_grid,
@@ -215,16 +239,31 @@ for _ in range(runs):
         kernel_omegas=kernel_omegas,
         kernel=kernel,
         source_sad=source_sad,
-        source_position=source_position,
-        source_v_x=source_v_x,
-        source_v_y=source_v_y,
-        source_v_z=source_v_z,
+        source_position=source.position,
+        source_v_x=source.v_x,
+        source_v_y=source.v_y,
+        source_v_z=source.v_z,
         n_depth_bins=np.int32(1192),
         kernel_depth_res_cm=np.float32(0.05),
         max_kernel_depth_cm=np.float32(59.6),
         ds_cm=np.float32(0.05),
     )
 print("dose time: " + str((time.time() - t0) / 3) + " s")
+
+
+fig, ax = plt.subplots(3, 2, figsize=(12, 16))
+ax[0, 0].set_title("oad")
+ax[0, 0].imshow(oad_grid[100, :, :], interpolation="nearest")
+ax[0, 1].set_title("d_geo")
+ax[0, 1].imshow(d_geo_grid[100, :, :], interpolation="nearest")
+ax[1, 0].set_title("d_eff")
+ax[1, 0].imshow(d_eff_grid[100, :, :], interpolation="nearest")
+ax[1, 1].set_title("fluence")
+ax[1, 1].imshow(fluence_grid[100, :, :], interpolation="nearest")
+ax[2, 0].set_title("terma")
+ax[2, 0].imshow(terma_grid[100, :, :], interpolation="nearest")
+ax[2, 1].set_title("dose")
+ax[2, 1].imshow(dose_grid[100, :, :], interpolation="nearest")
 
 
 # %%
