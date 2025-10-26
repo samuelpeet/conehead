@@ -100,6 +100,11 @@ __global__ void dose(float* dose_grid,
         corner_f3.y + resolution_f3.y * (y + 0.5),
         corner_f3.z + resolution_f3.z * (z + 0.5));
 
+    // Read source basis vectors (assumed to be unit / orthonormal)
+    float3 svx = make_float3(source_v_x[0], source_v_x[1], source_v_x[2]);
+    float3 svy = make_float3(source_v_y[0], source_v_y[1], source_v_y[2]);
+    float3 svz = make_float3(source_v_z[0], source_v_z[1], source_v_z[2]);
+
     // Precompute trigonometric values for all thetas and phis
     const int n_thetas = 16;
     const int n_phis = 12;
@@ -136,12 +141,17 @@ __global__ void dose(float* dose_grid,
             position_f3.y = centre_f3.y;
             position_f3.z = centre_f3.z;
 
-            // Use precomputed trig values to get ray direction
-            direction_f3.x = c_t_arr[it] * s_p_arr[ip];
-            direction_f3.y = c_p_arr[ip];
-            direction_f3.z = s_t_arr[it] * s_p_arr[ip];
-            float mag = sqrt(
-                direction_f3.x * direction_f3.x + direction_f3.y * direction_f3.y + direction_f3.z * direction_f3.z);
+            float local_x = c_t_arr[it] * s_p_arr[ip]; // local frame x
+            float local_y = c_p_arr[ip]; // local frame y
+            float local_z = s_t_arr[it] * s_p_arr[ip]; // local frame z
+
+            // Transform local/source-frame direction into world coordinates using basis vectors
+            direction_f3.x = local_x * svx.x + local_y * svy.x + local_z * svz.x;
+            direction_f3.y = local_x * svx.y + local_y * svy.y + local_z * svz.y;
+            direction_f3.z = local_x * svx.z + local_y * svy.z + local_z * svz.z;
+
+            // Normalize
+            float mag = sqrt(direction_f3.x * direction_f3.x + direction_f3.y * direction_f3.y + direction_f3.z * direction_f3.z);
             direction_f3.x /= mag;
             direction_f3.y /= mag;
             direction_f3.z /= mag;

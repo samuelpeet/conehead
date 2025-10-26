@@ -37,15 +37,8 @@ oads = np.array([0.0, 40.0], dtype=np.float32)
 off_axis_softening_fs_interp = np.array([0.0, 0.0], dtype=np.float32)
 mu_w = mu_water(energies)
 
-# num_voxels = np.array([201, 201, 201], dtype=np.int32)
-# corner = np.array([-20.1, 0.0, -20.1], dtype=np.float32)
-# resolution = np.array([0.2, 0.2, 0.2], dtype=np.float32)
-# source.position = np.array([0.0, -100.0, 0.0], dtype=np.float32)
-# source.v_x = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-# source.v_y = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-# source.v_z = np.array([0.0, 0.0, 1.0], dtype=np.float32)
-
 phantom = SimplePhantom()
+phantom.densities[phantom.densities == 4.0] = np.float32(0.5)  # Feature
 
 oad_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
 d_geo_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
@@ -61,6 +54,9 @@ fluence_map_sec = gaussian_filter(fluence_map_sec, sigma=(50, 50), mode="nearest
 terma_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
 mask_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
 dose_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
+
+source = Source()
+source.gantry = np.float32(45.0)
 
 kernels = [
     KernelMono(files("conehead.kernels").joinpath("0.5MeV/0.5MeV.egslst")),
@@ -90,9 +86,6 @@ kernel_phis_c = kernels[0].angles_centres
 kernel_thetas = np.linspace(0, 360 - (360 / 16), 16, dtype=np.float32)  # 16 thetas
 kernel = kernel / len(kernel_thetas)  # account for theta sampling
 kernel_omegas = (kernels[0].omegas / len(kernel_thetas)).astype(np.float32)
-
-source = Source()
-source.gantry = 45
 
 
 # d_geo_grid_py = np.zeros(phantom.num_voxels, dtype=np.float32)
@@ -203,6 +196,10 @@ for _ in range(runs):
         off_axis_softening_dx=np.float32(40.0),
     )
 print("terma time: " + str((time.time() - t0) / runs) + " s")
+
+
+# terma_grid = np.zeros_like(terma_grid, dtype=np.float32)  # reset terma grid for testing
+# terma_grid[100, 100, 100] = 1.0  # point terma for testing dose
 
 
 runs = 1
