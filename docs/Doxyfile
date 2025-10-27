@@ -1,0 +1,38 @@
+# Project
+PROJECT_NAME           = "conehead"
+OUTPUT_DIRECTORY       = docs/doxygen
+GENERATE_HTML          = NO
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+
+# Input
+INPUT                  = src/gpu
+RECURSIVE              = YES
+FILE_PATTERNS          = *.c *.cpp *.h *.hpp *.cu
+
+# Treat .cu as C++
+# Doxygen expects the canonical language name; use C++ so .cu files are
+# parsed as C++/CUDA source rather than treated only as program listings.
+EXTENSION_MAPPING      = cu=C++
+
+# Extract everything we commented with doxygen
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+
+# Predefine CUDA qualifiers and common CUDA/CUDA-helper types so Doxygen
+# can parse CUDA source as C++ and attach comments to functions.
+# Empty the common qualifiers so they are removed from declarations, and
+# provide safe typedefs for texture/handle types used in the code.
+PREDEFINED             = "__global__=;__device__=;__host__=;__shared__=;__constant__=;__forceinline__=;__inline__=;cudaTextureObject_t=unsigned long;Texture2DHandle=unsigned long;Texture3DHandle=unsigned long;typedef struct{float x;float y;} float2;typedef struct{float x;float y;float z;} float3;"
+
+# Enable preprocessing and macro expansion so the PREDEFINED entries above
+# are applied before parsing. This helps Doxygen recognise CUDA-decorated
+# functions (e.g. __global__ void foo(...)) as C++ functions and produce
+# member entries instead of dumping the file as a program listing.
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+
+# Optional: remove path prefixes in XML output (helpful for links)
+STRIP_FROM_PATH        = $(PROJECT_SOURCE_DIR)
