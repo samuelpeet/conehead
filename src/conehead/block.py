@@ -130,8 +130,11 @@ class Block:
         jaw_y_positions: npt.NDArray[np.float32] = np.floor(jaw_y_positions * 10)
 
         # Identify A and B bank ends
-        mlc_ends_a = mlc_ends[: int(len(mlc_ends) / 2)]
-        mlc_ends_b = mlc_ends[int(len(mlc_ends) / 2) :]
+        mlc_offset = np.float32(
+            settings["collimators"]["mlc"]["mlc_offset"] * 100
+        )  # cm to tenths of mm
+        mlc_ends_a = mlc_ends[: int(len(mlc_ends) / 2)] - mlc_offset
+        mlc_ends_b = mlc_ends[int(len(mlc_ends) / 2) :] + mlc_offset
 
         # Total width of MLC bank
         mlc_width = int(np.abs(mlc_boundaries[0] - mlc_boundaries[-1]))
