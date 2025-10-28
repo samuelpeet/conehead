@@ -1,0 +1,111 @@
+# Settings file for Varian Truebeam 6FFF with HD 120 MLC
+[sources]
+pri_s = 0.98373769
+pri_x = 0.14093192  # cm
+pri_y = 0.14093192  # cm
+pri_z = 0.5         # cm
+sec_s = 0.01626231
+sec_x = 25.26913868 # cm
+sec_y = 25.26913868 # cm
+sec_z = 20.0        # cm
+
+[collimators]
+x_jaw_trans = 0.005
+x_jaw_z = 44.5      # cm
+x_jaw_offset = 0.0  # cm
+y_jaw_trans = 0.005
+y_jaw_z = 35.7      # cm
+y_jaw_offset = 0.0  # cm
+[collimators.mlc]
+mlc_model = "HD120"
+mlc_direction = "X"     # "X" or "Y"
+mlc_trans = 0.0103
+mlc_z = 53.8            # cm
+mlc_offset = 0.0        # cm
+mlc_z_leaf = 6.7        # cm
+mlc_z_screw = 0.2       # cm
+mlc_x_tip_end = 0.0     # cm
+mlc_x_tip_start = 0.74  # cm
+mlc_x_r = 16.0          # cm
+mlc_x_screw_start = 1.7 # cm
+mlc_y_tg = 0.04         # cm
+
+[calculation]
+fluence_resampling = 3
+mask_enable = false
+mask_max_distance = 5                      # cm
+mask_terma_threshold = 0.005
+active_dose_interp_enable = false
+active_dose_interp_skip = 4
+active_dose_interp_terma_threshold = 0.002
+active_dose_interp_dose_threshold = 0.05
+
+[energy_spectrum]
+energies = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0] # MeV
+# weights = [0.2831, 0.15522, 0.09197, 0.06074, 0.04353, 0.03082, 0.02276, 0.01754, 0.0, 0.01004, 0.0, 0.00708]  # rs
+weights = [
+    0.30697153,
+    0.07478134,
+    0.06379992,
+    0.07548931,
+    0.0678365,
+    0.0375327,
+    0.02532493,
+    0.02908535,
+    0.0,
+    0.00514878,
+    0.0,
+    0.00353787,
+] # optimised
+# weights = [0.21079902, 0.15580743, 0.02820613, 0.10272335, 0.12207865, 0.54867018, 0.47356048, 0.0122561, 0.0, 0.0131351, 0.0, 0.01025312] 
+
+
+[off_axis_softening]
+oads = [0.0, 40.0]   # cm
+factors = [0.0, 0.0]
+
+[beam_profile_correction]
+oads = [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    5.0,
+    7.0,
+    9.0,
+    11.0,
+    12.0,
+    15.0,
+    17.0,
+    19.0,
+    21.0,
+    23.0,
+    24.0,
+    24.5,
+    25.0,
+    25.5,
+    26.0,
+    30.0,
+]
+factors = [
+    1.000,
+    0.998,
+    0.981,
+    0.960,
+    0.901,
+    0.837,
+    0.780,
+    0.727,
+    0.696,
+    0.625,
+    0.578,
+    0.537,
+    0.510,
+    0.475,
+    0.450,
+    0.440,
+    0.200,
+    0.100,
+    0.000,
+    0.000,
+]
