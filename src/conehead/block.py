@@ -9,10 +9,11 @@ class Block:
         self,
         rotation: npt.NDArray[np.float32] = np.array([0, 0, 0], dtype=np.float32),
         plan: FileDataset | None = None,
+        settings: dict | None = None,
     ):
         self.rotation = rotation
-        if plan:
-            self._set_from_plan(plan)
+        if plan and settings:
+            self._set_from_plan(plan, settings)
         else:
             self.xmin: np.float32 = np.float32(-20)
             self.xmax: np.float32 = np.float32(20)
@@ -92,7 +93,7 @@ class Block:
             fill_value=0,
         )
 
-    def _set_from_plan(self, plan: FileDataset):
+    def _set_from_plan(self, plan: FileDataset, settings: dict):
         # Extract info from plan
         for beam in plan.BeamSequence:
             if beam.BeamType != "STATIC":
@@ -140,14 +141,15 @@ class Block:
             def __init__(
                 self, min_bound: np.float32, max_bound: np.float32, end: np.float32, bank: str
             ):
-                self.T_meas = 0.02
-                self.z_leaf = np.floor(6.1 * 100)
-                self.z_screw = np.floor(0.33 * 100)
-                self.x_tip_end = np.floor(0.0 * 100)
-                self.x_tip_start = np.floor(0.6 * 100)
-                self.x_r = np.floor(8.0 * 100)
-                self.x_screw_start = np.floor(1.7 * 100)
-                self.y_tg = np.floor(0.04 * 100)
+                mlc = settings["collimators"]["mlc"]
+                self.T_meas = np.float32(mlc["mlc_trans"])
+                self.z_leaf = np.float32(mlc["mlc_z_leaf"]) * 100
+                self.z_screw = np.float32(mlc["mlc_z_screw"]) * 100
+                self.x_tip_end = np.float32(mlc["mlc_x_tip_end"]) * 100
+                self.x_tip_start = np.float32(mlc["mlc_x_tip_start"]) * 100
+                self.x_r = np.float32(mlc["mlc_x_r"]) * 100
+                self.x_screw_start = np.float32(mlc["mlc_x_screw_start"]) * 100
+                self.y_tg = np.float32(mlc["mlc_y_tg"]) * 100
 
                 self.min_bound = min_bound
                 self.max_bound = max_bound
