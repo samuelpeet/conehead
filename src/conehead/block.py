@@ -135,18 +135,27 @@ class Block:
         # Total width of MLC bank
         mlc_width = int(np.abs(mlc_boundaries[0] - mlc_boundaries[-1]))
 
-        # Internal class to manage the creation of leaves
+        # # Internal class to manage the creation of leaves
         class Leaf:
             def __init__(
                 self, min_bound: np.float32, max_bound: np.float32, end: np.float32, bank: str
             ):
+                self.T_meas = 0.02
+                self.z_leaf = np.floor(6.1 * 100)
+                self.z_screw = np.floor(0.33 * 100)
+                self.x_tip_end = np.floor(0.0 * 100)
+                self.x_tip_start = np.floor(0.6 * 100)
+                self.x_r = np.floor(8.0 * 100)
+                self.x_screw_start = np.floor(1.7 * 100)
+                self.y_tg = np.floor(0.04 * 100)
+
                 self.min_bound = min_bound
                 self.max_bound = max_bound
                 self.width = int(np.abs(max_bound - min_bound))
                 self.end = int(end)
                 self.bank = bank
-                self.r_min = int(min_bound + np.abs(mlc_boundaries[0]))
-                self.r_max = int(self.r_min + self.width)
+                self.r_min = int(min_bound + np.abs(mlc_boundaries[0]) - self.y_tg)
+                self.r_max = int(self.r_min + self.width + 2 * self.y_tg)
 
                 if bank == "A":
                     self.c_min = 0
@@ -163,49 +172,65 @@ class Block:
                     assert False, "bank must be 'A' or 'B'"
 
             def _leaf_transmission(self, width: int, height: int) -> npt.NDArray[np.float32]:
-                area: npt.NDArray[np.float32] = np.ones((width, height), dtype=np.float32)  # * 0.98
-                area[0, :] = 0.20
-                area[1, :] = 0.50
-                area[2, :] = 0.75
-                area[-1, :] = 0.20
-                area[-2, :] = 0.50
-                area[-3, :] = 0.75
-                area[:, -15:] *= np.linspace(1.0, 0.0, 15)
-                return 1 - area
+                x = np.arange(0, height, 1).astype(np.float32)
+                z = np.zeros_like(x).astype(np.float32)
+
+                # Calculate leaf thickness profile
+                for i in range(len(x)):
+                    if x[i] <= self.x_tip_start:
+                        z[i] = 2.0 * np.sqrt(self.x_r**2 - (self.x_r - x[i]) ** 2)
+                    elif x[i] < self.x_screw_start:
+                        z[i] = self.z_leaf
+                    else:
+                        z[i] = self.z_leaf - self.z_screw
+
+                # Tongue-and-groove effect
+                tg_pix = int(width + 2 * self.y_tg)
+                area = np.tile(z, (tg_pix, 1))
+                tg_num = int(self.y_tg * 2)
+                for i in range(tg_num):
+                    area[i, :] *= 0.5
+                    area[-(1 + i), :] *= 0.5
+
+                # Convert to transmission
+                mu_eff = -np.log(self.T_meas) / self.z_leaf
+                transmission = np.exp(-mu_eff * area)
+                return transmission
 
         # Create leaves
-        leaves_a: list[Leaf] = []
-        leaves_b: list[Leaf] = []
+        leaves = []
         for n in range(len(mlc_boundaries) - 1):
-            leaves_a.append(Leaf(mlc_boundaries[n], mlc_boundaries[n + 1], mlc_ends_a[n], "A"))
-            leaves_b.append(Leaf(mlc_boundaries[n], mlc_boundaries[n + 1], mlc_ends_b[n], "B"))
+            leaf = Leaf(mlc_boundaries[n], mlc_boundaries[n + 1], mlc_ends_a[n], "A")
+            leaves.append(leaf)
+        for n in range(len(mlc_boundaries) - 1):
+            leaf = Leaf(mlc_boundaries[n], mlc_boundaries[n + 1], mlc_ends_b[n], "B")
+            leaves.append(leaf)
 
-        # Slice each MLC leaf into the block plane
-        self.block_values = np.ones((mlc_width, 4000), dtype=np.float32)
-        for l in leaves_a:
-            self.block_values[l.r_min : l.r_max, l.c_min : l.c_max] = l.area
-        for l in leaves_b:
-            self.block_values[l.r_min : l.r_max, l.c_min : l.c_max] = l.area
+        # Slice each MLC leaf into the block plane. Most of this code is to handle boundary conditions
+        self.block_values = np.ones(
+            (int(np.abs(mlc_boundaries[0] - mlc_boundaries[-1])), 4000), dtype=np.float32
+        )
+        for i, leaf in enumerate(leaves):
+            x1_offset = 0
+            x2_offset = 0
+            if leaf.r_min >= 0:
+                x1 = leaf.r_min
+            else:
+                x1_offset = -leaf.r_min
+                x1 = 0
+            if leaf.r_max <= 3999:
+                x2 = leaf.r_max
+            else:
+                x2_offset = leaf.r_max - 3999
+                x2 = 3999
+            y1 = leaf.c_min
+            y2 = leaf.c_max
+            self.block_values[x1:x2, y1:y2] *= np.fliplr(
+                leaf.area[x1_offset : (leaf.r_max - leaf.r_min - x2_offset), :]
+            )
 
         # Include jaws in block plane
         self.block_values[:, : int(2000 + jaw_x_positions[0])] = 0.0
         self.block_values[:, int(2000 + jaw_x_positions[1]) :] = 0.0
         self.block_values[: int(mlc_width / 2 + jaw_y_positions[0]), :] = 0.0
         self.block_values[int(mlc_width / 2 + jaw_y_positions[1]) :, :] = 0.0
-
-        xmin, xmax, xnum = (-20, 20, 4000)
-        ymin, ymax, ynum = (mlc_boundaries[0] / 100, mlc_boundaries[-1] / 100, mlc_width)
-        self.block_locations = np.mgrid[xmin : xmax : xnum * 1j, ymin : ymax : ynum * 1j]
-        self.block_values_interp = RegularGridInterpolator(
-            (np.linspace(xmin, xmax, xnum), np.linspace(ymin, ymax, ynum)),
-            self.block_values,
-            method="nearest",
-            bounds_error=False,
-            fill_value=0,
-        )
-
-        # import matplotlib.pyplot as plt
-        # plt.imshow(self.block_values)
-        # plt.title('MLC Transmission')
-        # plt.colorbar()
-        # plt.show()
