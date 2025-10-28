@@ -17,17 +17,18 @@ y_jaw_trans = 0.005
 y_jaw_z = 35.7      # cm
 y_jaw_offset = 0.0  # cm
 [collimators.mlc]
-mlc_direction = "X"     # "X" or "Y"
+mlc_model = "Millennium120"
+mlc_direction = "X"         # "X" or "Y"
 mlc_trans = 0.0115
-mlc_z = 53.8            # cm
-mlc_offset = 0.0        # cm
-mlc_z_leaf = 6.1        # cm
-mlc_z_screw = 0.33      # cm
-mlc_x_tip_end = 0.0     # cm
-mlc_x_tip_start = 0.6   # cm
-mlc_x_r = 8.0           # cm
-mlc_x_screw_start = 1.7 # cm
-mlc_y_tg = 0.042        # cm
+mlc_z = 53.8                # cm
+mlc_offset = 0.0            # cm
+mlc_z_leaf = 6.1            # cm
+mlc_z_screw = 0.33          # cm
+mlc_x_tip_end = 0.0         # cm
+mlc_x_tip_start = 0.6       # cm
+mlc_x_r = 8.0               # cm
+mlc_x_screw_start = 1.7     # cm
+mlc_y_tg = 0.042            # cm
 
 [calculation]
 fluence_resampling = 3
