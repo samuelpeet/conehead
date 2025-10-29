@@ -133,7 +133,7 @@ __global__ void dose(float* dose_grid,
     for (int it = 0; it < n_thetas; it++) {
         for (int ip = 0; ip < n_phis; ip++) {
             float s = 0.0f;
-            float rad_depth = 0.0f;
+            float d_eq = 0.0f;
             int max_steps = (int)(max_kernel_depth_cm / ds_cm);
 
             // Initialize ray position at voxel centre
@@ -158,11 +158,6 @@ __global__ void dose(float* dose_grid,
 
             // We have direction and starting position; time to march along ray
             for (int step = 0; step < max_steps; step++) {
-                // Advance a step
-                position_f3.x += direction_f3.x * ds_cm;
-                position_f3.y += direction_f3.y * ds_cm;
-                position_f3.z += direction_f3.z * ds_cm;
-                s += ds_cm;
 
                 // Map position → voxel indices
                 int ix = (int)((position_f3.x - corner_f3.x) / resolution_f3.x);
@@ -173,16 +168,29 @@ __global__ void dose(float* dose_grid,
                     break; // Ray left grid
                 }
                 // Accumulate radiological depth
-                rad_depth += density_grid[idx2] * ds_cm;
+                float rho = density_grid[idx2];
+                float terma = terma_grid[idx2];
+                // float dt_wet = rho * ds_cm;
+                // rad_depth += dt_wet;
+
+                float ds_eff = 1 / rho * ds_cm; // cm in water-equivalent space
+                d_eq += ds_eff;
+                // s += ds_cm;
+
+                // Advance a step
+                position_f3.x += direction_f3.x * ds_eff;
+                position_f3.y += direction_f3.y * ds_eff;
+                position_f3.z += direction_f3.z * ds_eff;
+                s += ds_cm;
 
                 // Lookup kernel value corresponding to this radiological depth
-                int depth_idx = (int)(rad_depth / kernel_depth_res_cm);
+                int depth_idx = (int)(s / kernel_depth_res_cm);
                 if (depth_idx >= n_depth_bins) {
                     break; // Beyond end of kernel
                 }
                 float kernel_value = kernel[ip * n_depth_bins + depth_idx];
                 float vol = kernel_omegas[ip] * ds_cm * s * s; // Volume of sample sector
-                dose_acc += terma_grid[idx2] * kernel_value * vol;
+                dose_acc += terma * kernel_value * vol;
                 if (s >= max_kernel_depth_cm) {
                     break;
                 }

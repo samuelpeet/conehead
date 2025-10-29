@@ -2,6 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
+from scipy.interpolate import RegularGridInterpolator, make_interp_spline
 import sys
 import os
 import toml
@@ -10,12 +11,13 @@ from conehead.kernel import KernelMono
 from conehead.nist import mu_water
 from conehead.source import Source
 from conehead.phantom import SimplePhantom
+from conehead.block import Block
 
 sys.path.append(os.path.join(os.getcwd(), "../build/"))
 import conehead_gpu as gpu
 import time
 
-settings = toml.load("settings_6FFF.toml")
+settings = toml.load("Truebeam_6FFF_M120.toml")
 
 source_sad = np.float32(100.0)
 pri_s = np.float32(0.98373769)
@@ -38,25 +40,65 @@ off_axis_softening_fs_interp = np.array([0.0, 0.0], dtype=np.float32)
 mu_w = mu_water(energies)
 
 phantom = SimplePhantom()
-phantom.densities[phantom.densities == 4.0] = np.float32(0.5)  # Feature
+phantom.densities[:, 25:71, :] = np.float32(0.2813)  # Feature
+
+block = Block()
+block.set_square(np.float32(2))
+x_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
+y_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
+X_orig, Y_orig = np.meshgrid(x_orig, y_orig)
+x_target = np.linspace(-28.0, 28.0, 560)  # 560 points from -28 to 28
+y_target = np.linspace(-28.0, 28.0, 560)  # 560 points from -28 to 28
+X_target, Y_target = np.meshgrid(x_target, y_target)
+interpolator = RegularGridInterpolator(
+    (x_orig, y_orig), block.block_values, method="linear", bounds_error=False, fill_value=0
+)
+points_target = np.array([X_target.ravel(), Y_target.ravel()]).T
+block_interpolated = interpolator(points_target)
+block_interpolated_2d = block_interpolated.reshape(X_target.shape)
+pixel_pitch_cm = 0.1  # cm
+sigma_pix_x = settings["sources"]["pri_x"] / pixel_pitch_cm
+sigma_pix_y = settings["sources"]["pri_y"] / pixel_pitch_cm
+pri_fluence = gaussian_filter(
+    block_interpolated_2d, sigma=(sigma_pix_x, sigma_pix_y), mode="nearest"
+)
+sigma_pix_x = settings["sources"]["sec_x"] / pixel_pitch_cm
+sigma_pix_y = settings["sources"]["sec_y"] / pixel_pitch_cm
+sec_fluence = gaussian_filter(
+    block_interpolated_2d, sigma=(sigma_pix_x, sigma_pix_y), mode="nearest"
+)
+bpc_interp = make_interp_spline(
+    settings["beam_profile_correction"]["oads"], settings["beam_profile_correction"]["factors"], k=1
+)
+x = np.arange(-28, 28, 0.1, dtype=np.float32)
+y = np.arange(-28, 28, 0.1, dtype=np.float32)
+X, Y = np.meshgrid(x, y)
+r = np.sqrt(X**2 + Y**2)
+bpc = bpc_interp(r)
+fluence_map_pri = settings["sources"]["pri_s"] * pri_fluence * bpc
+fluence_map_sec = settings["sources"]["sec_s"] * sec_fluence
+fluence_map_pri = fluence_map_pri.astype(np.float32)
+fluence_map_sec = fluence_map_sec.astype(np.float32)
 
 oad_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
 d_geo_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
 d_eff_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
 density_grid = phantom.densities
 fluence_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
-fluence_map_pri = np.zeros((560, 560), dtype=np.float32) * pri_s
-fluence_map_pri[200:360, 200:360] = 1.0
-fluence_map_pri = gaussian_filter(fluence_map_pri, sigma=(2, 2), mode="nearest")
-fluence_map_sec = np.zeros((560, 560), dtype=np.float32) * sec_s
-fluence_map_sec[200:360, 200:360] = 1.0
-fluence_map_sec = gaussian_filter(fluence_map_sec, sigma=(50, 50), mode="nearest")
+# fluence_map_pri = np.zeros((560, 560), dtype=np.float32) * pri_s
+# fluence_map_pri[250:310, 250:310] = 1.0
+# fluence_map_pri = gaussian_filter(fluence_map_pri, sigma=(2, 2), mode="nearest")
+# fluence_map_pri = fluence_map_pri.astype(np.float32)
+# fluence_map_sec = np.zeros((560, 560), dtype=np.float32) * sec_s
+# fluence_map_sec[250:310, 250:310] = 1.0
+# fluence_map_sec = gaussian_filter(fluence_map_sec, sigma=(50, 50), mode="nearest")
+# fluence_map_sec = fluence_map_sec.astype(np.float32)
 terma_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
 mask_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
 dose_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
 
 source = Source()
-source.gantry = np.float32(45.0)
+# source.gantry = np.float32(45.0)
 
 kernels = [
     KernelMono(files("conehead.kernels").joinpath("0.5MeV/0.5MeV.egslst")),
@@ -248,19 +290,23 @@ for _ in range(runs):
 print("dose time: " + str((time.time() - t0) / 3) + " s")
 
 
+hx = phantom.num_voxels[0] // 2
+hy = phantom.num_voxels[1] // 2
+hz = phantom.num_voxels[2] // 2
+
 fig, ax = plt.subplots(3, 2, figsize=(12, 16))
 ax[0, 0].set_title("oad")
-ax[0, 0].imshow(oad_grid[100, :, :], interpolation="nearest")
+ax[0, 0].imshow(oad_grid[hz, :, :], interpolation="nearest")
 ax[0, 1].set_title("d_geo")
-ax[0, 1].imshow(d_geo_grid[100, :, :], interpolation="nearest")
+ax[0, 1].imshow(d_geo_grid[hz, :, :], interpolation="nearest")
 ax[1, 0].set_title("d_eff")
-ax[1, 0].imshow(d_eff_grid[100, :, :], interpolation="nearest")
+ax[1, 0].imshow(d_eff_grid[hz, :, :], interpolation="nearest")
 ax[1, 1].set_title("fluence")
-ax[1, 1].imshow(fluence_grid[100, :, :], interpolation="nearest")
+ax[1, 1].imshow(fluence_grid[hz, :, :], interpolation="nearest")
 ax[2, 0].set_title("terma")
-ax[2, 0].imshow(terma_grid[100, :, :], interpolation="nearest")
+ax[2, 0].imshow(terma_grid[hz, :, :], interpolation="nearest")
 ax[2, 1].set_title("dose")
-ax[2, 1].imshow(dose_grid[100, :, :], interpolation="nearest")
+ax[2, 1].imshow(dose_grid[hz, :, :], interpolation="nearest")
 
 
 # %%
