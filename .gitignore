@@ -116,3 +116,7 @@ pycuda-2025.1.2/
 # Doxygen
 docs/doxygen/xml/
 docs/doxygen/latex/
+
+examples/Prostate*
+
+*.DS_Store
