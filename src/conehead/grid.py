@@ -1,3 +1,5 @@
+from dataclasses import dataclass, field
+from typing import Optional, Tuple
 import numpy as np
 import numpy.typing as npt
 
@@ -6,20 +8,20 @@ import numpy.typing as npt
 
 This module provides a lightweight `Grid` container that stores the
 metadata and the 3D (voxel) array used across the codebase. The
-`Grid.values` array uses the shape ordering (nz, ny, nx) so indexing is
-consistently performed as ``values[z, y, x]``. The class intentionally
-keeps behaviour minimal: it normalises inputs to numpy arrays and
-initialises a zero-filled values buffer.
+`Grid.values` array uses the shape ordering ``(nz, ny, nx)`` so indexing
+is consistently performed as ``values[z, y, x]``. The dataclass stores
+raw input fields and canonicalises them in ``__post_init__``.
 
 Notes
 -----
-- Coordinates and sizes are plain numpy arrays with dtype float32 for
+- Coordinates and sizes are stored as numpy arrays with dtype float32 for
   ``corner`` and ``resolution`` and int32 for ``num_voxels``.
 - The voxel-centre location for voxel index ``(ix, iy, iz)`` is
   ``corner + (ix+0.5, iy+0.5, iz+0.5) * resolution`` when sampling.
 """
 
 
+@dataclass(slots=True)
 class Grid:
     """Lightweight 3D grid container.
 
@@ -34,6 +36,11 @@ class Grid:
         Voxel sizes along each axis (dx, dy, dz) in the same units as
         ``corner``. Resolution should be provided in the order
         ``(dx, dy, dz)`` corresponding to x, y, z axes.
+    values : Optional[numpy.ndarray]
+        Optional preallocated voxel buffer. If ``None`` a zero-filled
+        array with shape ``(nz, ny, nx)`` will be created in
+        ``__post_init__``. If provided, it will be converted to
+        float32 and validated for shape.
 
     Attributes
     ----------
@@ -44,8 +51,8 @@ class Grid:
     resolution : numpy.ndarray[float32]
         Float32 array with shape (3,) giving voxel sizes (dx, dy, dz).
     values : numpy.ndarray[float32]
-        The voxel buffer, initialised to zeros, with shape ``(nz, ny, nx)``.
-        Access with ``values[z, y, x]``.
+        The voxel buffer, initialised to zeros if not provided, with
+        shape ``(nz, ny, nx)``. Access with ``values[z, y, x]``.
 
     Examples
     --------
@@ -54,19 +61,30 @@ class Grid:
     (60, 80, 100)
     """
 
-    def __init__(
-        self,
-        num_voxels: npt.ArrayLike,
-        corner: npt.ArrayLike,
-        resolution: npt.ArrayLike,
-    ):
-        # Canonicalise shapes and types used throughout the project
-        self.num_voxels: npt.NDArray[np.int32] = np.asarray(num_voxels, dtype=np.int32)
-        self.corner: npt.NDArray[np.float32] = np.asarray(corner, dtype=np.float32)
-        self.resolution: npt.NDArray[np.float32] = np.asarray(resolution, dtype=np.float32)
+    num_voxels: npt.ArrayLike
+    corner: npt.ArrayLike
+    resolution: npt.ArrayLike
+    values: Optional[npt.NDArray[np.float32]] = field(default=None, repr=False)
 
-        # The internal buffer uses ordering (nz, ny, nx) so that the
-        # fastest-changing index corresponds to x when flattened.
-        self.values: npt.NDArray[np.float32] = np.zeros(
-            (self.num_voxels[2], self.num_voxels[1], self.num_voxels[0]), dtype=np.float32
-        )
+    def __post_init__(self) -> None:
+        # Canonicalise inputs
+        self.num_voxels = np.asarray(self.num_voxels, dtype=np.int32)
+        self.corner = np.asarray(self.corner, dtype=np.float32)
+        self.resolution = np.asarray(self.resolution, dtype=np.float32)
+
+        nx, ny, nz = int(self.num_voxels[0]), int(self.num_voxels[1]), int(self.num_voxels[2])
+
+        if self.values is None:
+            # Allocate a zero-filled buffer with ordering (nz, ny, nx)
+            self.values = np.zeros((nz, ny, nx), dtype=np.float32)
+        else:
+            arr = np.asarray(self.values, dtype=np.float32)
+            if arr.shape != (nz, ny, nx):
+                raise ValueError(f"values has wrong shape {arr.shape}; expected {(nz, ny, nx)}")
+            self.values = arr
+
+    @property
+    def shape(self) -> Tuple[int, int, int]:
+        """Return the grid shape as (nz, ny, nx)."""
+
+        return self.values.shape
