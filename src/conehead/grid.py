@@ -27,12 +27,12 @@ class Grid:
 
     Parameters
     ----------
-    num_voxels : array-like of int
+    num_voxels : numpy.ndarray[int32]
         Number of voxels along each axis in the order ``(nx, ny, nz)``.
-    corner : array-like of float
+    corner : numpy.ndarray[float32]
         World-space coordinates of the minimal corner (x, y, z) of the
         grid (i.e. the location of voxel index (0, 0, 0)).
-    resolution : array-like of float
+    resolution : numpy.ndarray[float32]
         Voxel sizes along each axis (dx, dy, dz) in the same units as
         ``corner``. Resolution should be provided in the order
         ``(dx, dy, dz)`` corresponding to x, y, z axes.
@@ -61,9 +61,9 @@ class Grid:
     (60, 80, 100)
     """
 
-    num_voxels: npt.ArrayLike
-    corner: npt.ArrayLike
-    resolution: npt.ArrayLike
+    num_voxels: npt.NDArray[np.int32]
+    corner: npt.NDArray[np.float32]
+    resolution: npt.NDArray[np.float32]
     values: Optional[npt.NDArray[np.float32]] = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -87,4 +87,4 @@ class Grid:
     def shape(self) -> Tuple[int, int, int]:
         """Return the grid shape as (nz, ny, nx)."""
 
-        return self.values.shape
+        return self.values.shape  # type: ignore
