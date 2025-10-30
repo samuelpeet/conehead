@@ -13,6 +13,8 @@ class Block:
     ):
         self.rotation = rotation
         if plan and settings:
+            if settings["mlc"]["mlc_type"] != "M120":
+                raise NotImplementedError("Only Millennium 120 MLC is currently implemented.")
             self._set_from_plan(plan, settings)
         else:
             self.xmin: np.float32 = np.float32(-20)
