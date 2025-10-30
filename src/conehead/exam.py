@@ -25,47 +25,81 @@ class Exam:
     The ``Exam`` class encapsulates the following responsibilities:
     - loading an HU->density lookup table (TOML file),
     - loading a DICOM CT series and converting pixel values to mass
-      density (g/cc), and
+        density (g/cc), and
     - resampling the internal density volume onto arbitrary target
-      grids.
+        grids.
 
     Parameters
     ----------
     hu_lut_path : str
-        Path to a TOML file that contains a ``[LUT]`` table with two
-        arrays: ``hu`` (Hounsfield units) and ``density`` (matching
-        units, e.g. g/cc). The LUT is used with ``numpy.interp`` to map
-        CT values to densities.
-    dicom_folder : str or None
-        Path to a folder containing a DICOM CT series. If ``None``, the
-        instance will only load the HU LUT and no densities will be
-        available until ``_load_dicom_series`` is called.
+            Path to a TOML file that contains a ``[LUT]`` table with two
+            arrays: ``hu`` (Hounsfield units) and ``density`` (matching
+            units, e.g. g/cc). The LUT is used with ``numpy.interp`` to map
+            CT values to densities.
+    dicom_folder : str or None, optional
+            Path to a folder containing a DICOM CT series. If provided and
+            ``densities`` is ``None``, the series will be read and converted
+            to a :class:`Grid` stored at ``self.densities``.
+    densities : Grid or None, optional
+            If provided, this prebuilt :class:`Grid` (with values in g/cc)
+            will be used directly as ``self.densities``. This is useful for
+            testing or when constructing synthetic CT phantoms. When both
+            ``densities`` and ``dicom_folder`` are provided, ``densities``
+            takes precedence and the DICOM folder is ignored.
 
     Attributes
     ----------
     hu_lut : dict
-        Dictionary loaded from the TOML file. Expected to contain keys
-        ``"hu"`` and ``"density"`` with sequences of the same length.
+            Dictionary loaded from the TOML file. Expected to contain keys
+            ``"hu"`` and ``"density"`` with sequences of the same length.
     densities : Grid
-        A :class:`Grid` instance holding the converted density volume in
-        shape ``(nz, ny, nx)``. This attribute is created by
-        :meth:`_load_dicom_series` and will not be present if no DICOM
-        folder was provided.
+            A :class:`Grid` instance holding the converted density volume in
+            shape ``(nz, ny, nx)``. This attribute is created by
+            :meth:`_load_dicom_series` unless a prebuilt ``densities`` Grid
+            was supplied to the constructor.
 
     Notes
     -----
     - The DICOM images are filtered for SOP Class ``CT Image Storage``
-      and sorted by the z-component of ``ImagePositionPatient``.
+        and sorted by the z-component of ``ImagePositionPatient``.
     - The code expects Rescale Slope/Intercept to be present in the
-      DICOM header and will apply them to produce Hounsfield units
-      before LUT mapping.
+        DICOM header and will apply them to produce Hounsfield units
+        before LUT mapping.
     - Spatial units: DICOM positions/spacing are converted from mm to
-      cm by multiplying by 0.1 before being stored in the Grid.
+        cm by multiplying by 0.1 before being stored in the Grid.
     """
 
-    def __init__(self, hu_lut_path: str, dicom_folder: str | None):
+    def __init__(
+        self, hu_lut_path: str, dicom_folder: str | None = None, densities: Grid | None = None
+    ):
+        """Create an Exam.
+
+        Parameters
+        ----------
+        hu_lut_path : str
+            Path to the HU->density TOML file.
+        dicom_folder : str, optional
+            Path to a folder containing a DICOM CT series. If provided
+            and ``densities`` is None, the series will be loaded and
+            converted to a :class:`Grid` stored as ``self.densities``.
+        densities : Grid, optional
+            If provided, this Grid will be used directly as
+            ``self.densities`` (useful for tests or synthetic phantoms).
+
+        Notes
+        -----
+        If both ``densities`` and ``dicom_folder`` are provided, the
+        explicit ``densities`` argument takes precedence and the DICOM
+        folder will not be read.
+        """
         self.hu_lut = self._load_hu_lut(hu_lut_path)
-        if dicom_folder is not None:
+        # If caller supplied a prebuilt Grid, use it directly
+        if densities is not None:
+            if not isinstance(densities, Grid):
+                raise TypeError("densities must be an instance of conehead.grid.Grid")
+            self.densities = densities
+        # Otherwise load from DICOM if requested
+        elif dicom_folder is not None:
             self._load_dicom_series(dicom_folder)
 
     def _load_hu_lut(self, hu_lut_path: str) -> dict:
