@@ -1,4 +1,3 @@
-import os
 import toml
 import numpy as np
 import pydicom
@@ -41,21 +40,22 @@ def _make_dicom_slice(path, z, value=100):
 
     ds = FileDataset(str(path), {}, file_meta=file_meta, preamble=b"\0" * 128)
     ds.SOPClassUID = pydicom.uid.CTImageStorage
-    ds.Rows = 2
-    ds.Columns = 2
+    ds.Rows = 3
+    ds.Columns = 3
     ds.SamplesPerPixel = 1
     ds.PhotometricInterpretation = "MONOCHROME2"
     ds.BitsAllocated = 16
     ds.BitsStored = 16
     ds.HighBit = 15
-    ds.PixelRepresentation = 0
+    ds.PixelRepresentation = 1
     ds.PixelSpacing = [1.0, 1.0]
     ds.SliceThickness = 1.0
     ds.ImagePositionPatient = [0.0, 0.0, float(z)]
     ds.RescaleSlope = 1.0
     ds.RescaleIntercept = 0.0
-    arr = np.ones((2, 2), dtype=np.uint16) * np.int16(value)
+    arr = np.ones((3, 3), dtype=np.int16) * np.int16(value)
     ds.PixelData = arr.tobytes()
+
     # Save using proper write semantics
     # Use the modern save argument to enforce a proper DICOM file format
     ds.save_as(str(path), enforce_file_format=True)
@@ -70,13 +70,15 @@ def test_construct_with_dicom_and_lut(tmp_path):
     dicom_dir = tmp_path / "dicoms"
     dicom_dir.mkdir()
     # create two simple slices at z=0 and z=1
-    _make_dicom_slice(dicom_dir / "slice0.dcm", z=0, value=100)
-    _make_dicom_slice(dicom_dir / "slice1.dcm", z=1, value=200)
+    _make_dicom_slice(dicom_dir / "slice0.dcm", z=0, value=2)
+    _make_dicom_slice(dicom_dir / "slice1.dcm", z=1, value=3)
 
     ex = Exam(hu_lut_path=str(lut_path), dicom_folder=str(dicom_dir))
     assert hasattr(ex, "densities")
     g = ex.densities
     assert isinstance(g, Grid)
-    # values should be float32 and have nz=2
+    # values should be float32 and have nz=2, ny=3, nx=3
     assert g.values.dtype == np.float32  # type: ignore
     assert g.values.shape[0] == 2  # type: ignore
+    assert g.values.shape[1] == 3  # type: ignore
+    assert g.values.shape[2] == 3  # type: ignore
