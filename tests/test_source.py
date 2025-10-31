@@ -16,6 +16,7 @@ class TestSource:
         source = Source()
         print(source)
         source.gantry = np.float32(0)
+        assert source.gantry == 0
         correct_pos = np.array([0, -100, 0])
         np.testing.assert_array_almost_equal(correct_pos, source.position, decimal=5)
         np.testing.assert_array_almost_equal(source.v_x, np.array([1, 0, 0]), decimal=5)
@@ -63,6 +64,7 @@ class TestSource:
     def test_collimator_90(self):
         source = Source()
         source.collimator = np.float32(90)
+        assert source.collimator == 90
 
         np.testing.assert_array_almost_equal(source.v_x, np.array([0, 0, 1]), decimal=5)
         np.testing.assert_array_almost_equal(source.v_y, np.array([0, 1, 0]), decimal=5)
