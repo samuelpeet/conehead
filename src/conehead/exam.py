@@ -29,18 +29,21 @@ class Exam:
     - resampling the internal density volume onto arbitrary target
         grids.
 
-    Parameters
-    ----------
-    hu_lut_path : str
+        Parameters
+        ----------
+        hu_lut_path : str or None
             Path to a TOML file that contains a ``[LUT]`` table with two
             arrays: ``hu`` (Hounsfield units) and ``density`` (matching
             units, e.g. g/cc). The LUT is used with ``numpy.interp`` to map
-            CT values to densities.
-    dicom_folder : str or None, optional
+            CT values to densities. This parameter is optional unless
+            ``dicom_folder`` is provided (see below).
+        dicom_folder : str or None, optional
             Path to a folder containing a DICOM CT series. If provided and
             ``densities`` is ``None``, the series will be read and converted
-            to a :class:`Grid` stored at ``self.densities``.
-    densities : Grid or None, optional
+            to a :class:`Grid` stored at ``self.densities``. When a
+            DICOM folder is supplied, a valid ``hu_lut_path`` must also be
+            supplied so CT Hounsfield units can be mapped to density.
+        densities : Grid or None, optional
             If provided, this prebuilt :class:`Grid` (with values in g/cc)
             will be used directly as ``self.densities``. This is useful for
             testing or when constructing synthetic CT phantoms. When both
@@ -70,7 +73,10 @@ class Exam:
     """
 
     def __init__(
-        self, hu_lut_path: str, dicom_folder: str | None = None, densities: Grid | None = None
+        self,
+        hu_lut_path: str | None = None,
+        dicom_folder: str | None = None,
+        densities: Grid | None = None,
     ):
         """Create an Exam.
 
@@ -92,7 +98,11 @@ class Exam:
         explicit ``densities`` argument takes precedence and the DICOM
         folder will not be read.
         """
-        self.hu_lut = self._load_hu_lut(hu_lut_path)
+        # Load HU LUT only if provided or required
+        self.hu_lut = None
+        if hu_lut_path is not None:
+            self.hu_lut = self._load_hu_lut(hu_lut_path)
+
         # If caller supplied a prebuilt Grid, use it directly
         if densities is not None:
             if not isinstance(densities, Grid):
@@ -100,6 +110,9 @@ class Exam:
             self.densities = densities
         # Otherwise load from DICOM if requested
         elif dicom_folder is not None:
+            # DICOM loading requires an HU->density LUT
+            if self.hu_lut is None:
+                raise ValueError("hu_lut_path is required when dicom_folder is provided")
             self._load_dicom_series(dicom_folder)
 
     def _load_hu_lut(self, hu_lut_path: str) -> dict:
@@ -159,7 +172,7 @@ class Exam:
             path = os.path.join(dicom_folder, f)
             try:
                 ds = pydicom.dcmread(path)
-            except Exception as e:
+            except Exception:
                 # Skip files that fail to parse
                 continue
             dicom_files.append(ds)
@@ -219,9 +232,13 @@ class Exam:
         ct_volume = ct_volume * rescale_slope + rescale_intercept
 
         # Convert HU to density
-        ct_volume = np.interp(ct_volume, self.hu_lut["hu"], self.hu_lut["density"]).astype(
-            np.float32
-        )
+        lut = self.hu_lut
+        if lut is None:
+            # This should not happen because callers that request DICOM loading
+            # are required to provide an HU LUT at construction time.
+            raise RuntimeError("HU LUT not loaded; cannot convert HU to density")
+
+        ct_volume = np.interp(ct_volume, lut["hu"], lut["density"]).astype(np.float32)
 
         # Construct the Grid object that holds the densities
         num_voxels = np.array((cols, rows, len(dicom_files)), dtype=np.int32)
@@ -257,26 +274,34 @@ class Exam:
         ValueError
             If no density volume is loaded on this Exam instance.
         """
-        if not hasattr(self, "densities"):
+        if getattr(self, "densities", None) is None:
             raise ValueError(
                 "No density volume loaded; call _load_dicom_series first or provide a dicom_folder to the constructor"
             )
 
-        vol = self.densities.values
+        vol = getattr(self.densities, "values", None)
+        if vol is None:
+            raise ValueError("Loaded density Grid contains no values to plot")
+
         nz = vol.shape[0]
         if z_index is None:
-            z_index = nz // 2
-        if not (0 <= z_index < nz):
-            raise IndexError(f"z_index {z_index} out of range [0, {nz})")
+            zi = nz // 2
+        else:
+            zi = z_index
 
-        slice_img = vol[z_index, :, :]
+        # Ensure zi is an int for safe comparisons
+        zi = int(zi)
+        if not (0 <= zi < nz):
+            raise IndexError(f"z_index {zi} out of range [0, {nz})")
+
+        slice_img = vol[zi, :, :]
         created_fig = False
         if ax is None:
             fig, ax = plt.subplots(figsize=(6, 6))
             created_fig = True
 
         im = ax.imshow(slice_img, origin="upper", cmap=cmap)
-        ax.set_title(f"Density slice z={z_index}")
+        ax.set_title(f"Density slice z={zi}")
         ax.set_xlabel("x (voxels)")
         ax.set_ylabel("y (voxels)")
         plt.colorbar(im, ax=ax, label="density (g/cc)")
