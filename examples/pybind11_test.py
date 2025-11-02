@@ -35,15 +35,30 @@ mask_terma_threshold = np.float32(0.005)
 energies = settings["energy_spectrum"]["energies"]
 energy_weights = settings["energy_spectrum"]["weights"]
 
+
+# energies = np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)
+# energy_weights = np.array(settings["energy_spectrum"]["weights"], dtype=np.float32)
+# mu = 1.6
+# sigma = 1.6
+# energy_weights = 1 / (np.sqrt(2 * np.pi) * sigma * energies)
+# energy_weights *= np.exp(-((np.log(energies) - mu) ** 2) / (2 * sigma**2))
+
+# # energy_weights = np.power(energies, C1 - 1) * np.exp(-C2 * energies)
+# # energy_weights = energy_weights.astype(np.float32)
+# N = np.sum(energy_weights)
+# energy_weights /= N
+# energy_weights /= energies
+
+
 oads = np.array([0.0, 40.0], dtype=np.float32)
 off_axis_softening_fs_interp = np.array([0.0, 0.0], dtype=np.float32)
 mu_w = mu_water(energies)
 
 phantom = SimplePhantom()
-phantom.densities[:, 25:71, :] = np.float32(0.2813)  # Feature
+# phantom.densities[:, 25:71, :] = np.float32(0.2813)  # Feature
 
 block = Block()
-block.set_square(np.float32(2))
+block.set_square(np.float32(10))
 x_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
 y_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
 X_orig, Y_orig = np.meshgrid(x_orig, y_orig)
@@ -239,7 +254,6 @@ for _ in range(runs):
     )
 print("terma time: " + str((time.time() - t0) / runs) + " s")
 
-
 # terma_grid = np.zeros_like(terma_grid, dtype=np.float32)  # reset terma grid for testing
 # terma_grid[100, 100, 100] = 1.0  # point terma for testing dose
 
@@ -290,6 +304,19 @@ for _ in range(runs):
 print("dose time: " + str((time.time() - t0) / 3) + " s")
 
 
+x_gap = np.abs(block.x2_jaw_pos - block.x1_jaw_pos)
+y_gap = np.abs(block.y2_jaw_pos - block.y1_jaw_pos)
+
+field_measure = 2 * x_gap * y_gap / (x_gap + y_gap)
+ofc = np.interp(
+    field_measure,
+    settings["output_factor_correction"]["field_sizes"],
+    settings["output_factor_correction"]["factors"],
+).astype(np.float32)
+N = np.float32(settings["calculation"]["normalisation"])
+MU = np.float32(100.0)
+dose_grid = dose_grid * ofc * N * MU
+
 hx = phantom.num_voxels[0] // 2
 hy = phantom.num_voxels[1] // 2
 hz = phantom.num_voxels[2] // 2
@@ -310,7 +337,49 @@ ax[2, 1].imshow(dose_grid[hz, :, :], interpolation="nearest")
 
 
 # %%
+class Curve:
+    def __init__(self, x, y, type, size, of, depth=0.0):
+        self.x = x
+        self.y = y
+        self.type = type
+        self.size = size
+        self.depth = depth
+        self.of = of
 
+
+import pandas as pd
+
+file_path = "6FFF Beam Data.xlsx"
+df = pd.read_excel(file_path, sheet_name="Open Field Depth Dose")
+measured_03x03_pdd = Curve(
+    x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 1]), type="depth", size=3, of=0.8432
+)
+measured_04x04_pdd = Curve(
+    x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 2]), type="depth", size=4, of=0.8753
+)
+measured_06x06_pdd = Curve(
+    x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 3]), type="depth", size=6, of=0.9285
+)
+measured_08x08_pdd = Curve(
+    x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 4]), type="depth", size=8, of=0.9704
+)
+measured_10x10_pdd = Curve(
+    x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 5]), type="depth", size=10, of=1.000
+)
+measured_20x20_pdd = Curve(
+    x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 6]), type="depth", size=20, of=1.0837
+)
+measured_30x30_pdd = Curve(
+    x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 7]), type="depth", size=30, of=1.1190
+)
+measured_40x40_pdd = Curve(
+    x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 8]), type="depth", size=40, of=1.1349
+)
+xs = np.linspace(0, 40, 201) + 0.1
+plt.plot(
+    measured_10x10_pdd.x, measured_10x10_pdd.y / measured_10x10_pdd.y.max(), label="Measured 10x10"
+)
+plt.plot(xs, dose_grid[hx, :, hz] / dose_grid[hx, :, hz].max(), label="Calculated 10x10")
 # oad time: 0.00802924633026123 s
 # d_geo time: 0.007828712463378906 s
 # d_eff time: 0.03479955196380615 s
@@ -318,3 +387,5 @@ ax[2, 1].imshow(dose_grid[hz, :, :], interpolation="nearest")
 # terma time: 0.05031294822692871 s
 # mask time: 0.011710929870605468 s
 # dose time: 5.819006522496541 s
+
+# %%

@@ -119,6 +119,11 @@ class Block:
         y2 = int((self.ynum / 2) + (length / 2) * self.yres)
         self.block_values[x1:x2, y1:y2] = np.float32(1)
 
+        self.x1_jaw_pos = -length / 2
+        self.x2_jaw_pos = length / 2
+        self.y1_jaw_pos = -length / 2
+        self.y2_jaw_pos = length / 2
+
     def _set_from_plan(self, plan: FileDataset, settings: dict):
         # Extract info from plan
         for beam in plan.BeamSequence:
