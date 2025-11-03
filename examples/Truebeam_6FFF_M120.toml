@@ -33,9 +33,9 @@ mlc_y_tg = 0.042            # cm
 [calculation]
 normalisation = 66342.58
 fluence_resampling = 3
-mask_enable = false
-mask_max_distance = 5                      # cm
-mask_terma_threshold = 0.005
+terma_mask_enable = true
+terma_mask_max_distance = 8                # cm
+terma_mask_terma_threshold = 0.005
 active_dose_interp_enable = false
 active_dose_interp_skip = 4
 active_dose_interp_terma_threshold = 0.002

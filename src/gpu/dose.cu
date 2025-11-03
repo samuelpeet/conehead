@@ -86,9 +86,17 @@ __global__ void dose(float* dose_grid,
         return;
     }
 
+    // TERMA mask
     if (mask_grid[idx] == 0.0f) {
         // Skip convolution for this voxel
-        dose_grid[idx] = terma_grid[idx];
+        dose_grid[idx] = 0.0f;
+        return;
+    }
+
+    // Outside external/support structures
+    if (density_grid[idx] == -1.0f) {
+        // Skip convolution for this voxel
+        dose_grid[idx] = 0.0f;
         return;
     }
 
@@ -345,6 +353,8 @@ void map_dose(pybind11::array_t<float> dose_grid,
         d_kernel_thetas, d_kernel_phis, d_kernel_omegas, d_kernel,
         source_sad, d_source_position, d_source_v_x, d_source_v_y, d_source_v_z,
         n_depth_bins, kernel_depth_res_cm, max_kernel_depth_cm, ds_cm);
+
+    // cudaDeviceSynchronize();
 
     // Copy result back to host
     cudaMemcpy(dose_grid_ptr, d_dose_grid,
