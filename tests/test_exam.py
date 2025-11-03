@@ -3,7 +3,8 @@ import toml
 import numpy as np
 import pydicom
 import pydicom.uid
-from pydicom.dataset import FileDataset, FileMetaDataset
+from pydicom.dataset import FileDataset, FileMetaDataset, Dataset
+from pydicom.sequence import Sequence
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 import pytest
 import tempfile
@@ -11,6 +12,7 @@ import os
 
 from conehead.grid import Grid
 from conehead.exam import Exam
+from conehead.structure import ROI, StructureSet
 
 
 def test_construct_with_densities_only():
@@ -332,3 +334,162 @@ def test_densities_on_grid_without_source():
     target = Grid(num_voxels=[1, 1, 1], corner=[0, 0, 0], resolution=[1, 1, 1])
     with pytest.raises(Exception):
         ex.densities_on_grid(target)
+
+
+def test_load_structures_and_masking(tmp_path):
+    # Prepare LUT
+    lut = {"LUT": {"hu": [0, 1000], "density": [0.0, 1.0]}}
+    lut_path = tmp_path / "lut_struct.toml"
+    lut_path.write_text(toml.dumps(lut))
+
+    dicom_dir = tmp_path / "dicoms_struct"
+    dicom_dir.mkdir()
+
+    # Create two CT slices (z=0 and z=1)
+    _make_dicom_slice(dicom_dir / "slice0.dcm", z=0, value=0)
+    _make_dicom_slice(dicom_dir / "slice1.dcm", z=1, value=0)
+
+    # Create an RTSTRUCT file with an External that covers whole space and
+    # a small ROI with a density override.
+    from pydicom.dataset import FileDataset, FileMetaDataset
+
+    file_meta = FileMetaDataset()
+    file_meta.MediaStorageSOPClassUID = pydicom.uid.RTStructureSetStorage
+    file_meta.MediaStorageSOPInstanceUID = generate_uid()
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    rt = FileDataset(str(dicom_dir / "rt.dcm"), {}, file_meta=file_meta, preamble=b"\0" * 128)
+    rt.SOPClassUID = pydicom.uid.RTStructureSetStorage
+
+    # StructureSetROISequence: two ROIs (1=External, 2=Override)
+    r1 = Dataset()
+    r1.ROINumber = 1
+    r1.ROIName = "External Body"
+    r2 = Dataset()
+    r2.ROINumber = 2
+    r2.ROIName = "Override"
+    rt.StructureSetROISequence = Sequence([r1, r2])
+
+    # ROIContourSequence: External large contour and small override contour
+    ext = Dataset()
+    ext.ReferencedROINumber = 1
+    ext_c = Dataset()
+    # large square in mm that will cover the CT grid after conversion to cm
+    ext_c.ContourData = [
+        -100.0,
+        -100.0,
+        0.0,
+        100.0,
+        -100.0,
+        0.0,
+        100.0,
+        100.0,
+        0.0,
+        -100.0,
+        100.0,
+        0.0,
+    ]
+    ext.ContourSequence = Sequence([ext_c])
+
+    ov = Dataset()
+    ov.ReferencedROINumber = 2
+    ov_c = Dataset()
+    # small square inside the first slice at mm coords
+    ov_c.ContourData = [0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 5.0, 5.0, 0.0, 0.0, 5.0, 0.0]
+    ov.ContourSequence = Sequence([ov_c])
+    rt.ROIContourSequence = Sequence([ext, ov])
+
+    # RTROIObservationsSequence: mark ROI 1 as EXTERNAL; ROI 2 has density override
+    o1 = Dataset()
+    o1.ReferencedROINumber = 1
+    o1.RTROIInterpretedType = "EXTERNAL"
+    o2 = Dataset()
+    o2.ReferencedROINumber = 2
+    prop = Dataset()
+    prop.ROIPhysicalProperty = "REL_MASS_DENSITY"
+    prop.ROIPhysicalPropertyValue = 2.5
+    o2.ROIPhysicalPropertiesSequence = Sequence([prop])
+    rt.RTROIObservationsSequence = Sequence([o1, o2])
+
+    rt.save_as(str(dicom_dir / "rt.dcm"), enforce_file_format=True)
+
+    # Now construct Exam which should load densities and structures
+    ex = Exam(hu_lut_path=str(lut_path), dicom_folder=str(dicom_dir))
+    assert hasattr(ex, "structure_set")
+    assert ex.structure_set is not None
+    assert hasattr(ex, "densities_masked")
+
+    # External mask should flag outside voxels as -1.0
+    ext_list = ex.structure_set.get_roi_by_type("EXTERNAL")
+    assert len(ext_list) == 1
+    external = ext_list[0]
+    ext_mask = external.mask_on_grid(ex.densities)
+    assert np.all(ex.densities_masked.values[~ext_mask] == -1.0)
+
+    # Override ROI should set values to 2.5 where its mask is True
+    roi2 = ex.structure_set.get_roi_by_number(2)
+    assert roi2 is not None
+    roi2_mask = roi2.mask_on_grid(ex.densities)
+    # Only check that at least one masked voxel equals the override
+    assert np.any(np.isclose(ex.densities_masked.values[roi2_mask], 2.5))
+
+
+def test_load_structure_set_none_and_multiple(tmp_path):
+    # When no RTSTRUCT present, _load_structure_set should return None
+    dicom_dir = tmp_path / "nodct"
+    dicom_dir.mkdir()
+    _make_dicom_slice(dicom_dir / "slice0.dcm", z=0, value=1)
+
+    ex = Exam(
+        densities=Grid(
+            num_voxels=np.array([1, 1, 1], dtype=np.int32),
+            corner=np.array([0.0, 0.0, 0.0], dtype=np.float32),
+            resolution=np.array([1.0, 1.0, 1.0], dtype=np.float32),
+        )
+    )
+    res = ex._load_structure_set(str(dicom_dir))
+    assert res is None
+
+    # If multiple RT Structure files exist, a ValueError should be raised
+    # Create two RT files
+    from pydicom.dataset import FileDataset, FileMetaDataset
+
+    file_meta = FileMetaDataset()
+    file_meta.MediaStorageSOPClassUID = pydicom.uid.RTStructureSetStorage
+    file_meta.MediaStorageSOPInstanceUID = generate_uid()
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    rt1 = FileDataset(str(dicom_dir / "r1.dcm"), {}, file_meta=file_meta, preamble=b"\0" * 128)
+    rt1.SOPClassUID = pydicom.uid.RTStructureSetStorage
+    rt1.StructureSetROISequence = Sequence([])
+    rt1.save_as(str(dicom_dir / "r1.dcm"), enforce_file_format=True)
+
+    rt2 = FileDataset(str(dicom_dir / "r2.dcm"), {}, file_meta=file_meta, preamble=b"\0" * 128)
+    rt2.SOPClassUID = pydicom.uid.RTStructureSetStorage
+    rt2.StructureSetROISequence = Sequence([])
+    rt2.save_as(str(dicom_dir / "r2.dcm"), enforce_file_format=True)
+
+    with pytest.raises(ValueError):
+        ex._load_structure_set(str(dicom_dir))
+
+
+def test_mask_raises_when_no_external():
+    # Prepare a densities Grid and a StructureSet without an external ROI
+    g = Grid(
+        num_voxels=np.array([2, 2, 1], dtype=np.int32),
+        corner=np.array([0.0, 0.0, 0.0], dtype=np.float32),
+        resolution=np.array([1.0, 1.0, 1.0], dtype=np.float32),
+    )
+    g.values[:] = 0.0
+    ex = Exam(densities=g)
+
+    # Create a StructureSet with an ROI that has no 'EXTERNAL' interpreted type
+    roi = ROI(
+        roi_number=1,
+        name="SomeROI",
+        contours=[np.array([[0.0, 0.0, 0.5], [1.0, 0.0, 0.5], [1.0, 1.0, 0.5]], dtype=np.float32)],
+    )
+    ss = StructureSet(rois=[roi])
+    ex.structure_set = ss
+    with pytest.raises(ValueError):
+        ex._mask_densities_by_structures()

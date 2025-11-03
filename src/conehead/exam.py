@@ -5,6 +5,7 @@ import toml
 import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
 from conehead.grid import Grid
+from conehead.structure import StructureSet
 
 
 """Utilities for loading CT exams and converting HU -> density.
@@ -113,7 +114,9 @@ class Exam:
             # DICOM loading requires an HU->density LUT
             if self.hu_lut is None:
                 raise ValueError("hu_lut_path is required when dicom_folder is provided")
-            self._load_dicom_series(dicom_folder)
+            self.densities = self._load_dicom_series(dicom_folder)
+            self.structure_set = self._load_structure_set(dicom_folder)
+            self.densities_masked = self._mask_densities_by_structures()
 
     def _load_hu_lut(self, hu_lut_path: str) -> dict:
         """Load an HU->density lookup table from a TOML file.
@@ -248,14 +251,105 @@ class Exam:
             [pixel_spacing[0], pixel_spacing[1], slice_thickness], dtype=np.float32
         )  # dx, dy, dz
         resolution *= 0.1  # convert from mm to cm
-        self.densities = Grid(
+        return Grid(
             num_voxels=num_voxels,
             corner=corner,
             resolution=resolution,
             values=ct_volume,
         )
 
-    def plot_slice(self, z_index: int | None = None, ax=None, cmap: str = "gray") -> None:
+    def _load_structure_set(self, dicom_folder: str):
+        """Load structures from a DICOM RT Structure Set in the provided
+        folder.
+
+        Parameters
+        ----------
+        dicom_folder : str
+            Directory containing the DICOM files for the CT series
+            and RT Structure Set.
+        """
+
+        dicom_files = []
+        for f in os.listdir(dicom_folder):
+            if not f.endswith(".dcm"):
+                continue
+            path = os.path.join(dicom_folder, f)
+            try:
+                ds = pydicom.dcmread(path)
+            except Exception:
+                # Skip files that fail to parse
+                print(f"Failed to read DICOM file: {path}")
+                continue
+            dicom_files.append(ds)
+        # Remove any non-CT images
+        dicom_files = [
+            f
+            for f in dicom_files
+            if getattr(f, "SOPClassUID", None) is not None
+            and f.SOPClassUID.name == "RT Structure Set Storage"
+        ]
+        if len(dicom_files) == 0:
+            # No RT Struct file found
+            return None
+        if len(dicom_files) > 1:
+            raise ValueError(
+                f"Multiple RT Structure Set DICOM files found in folder: {dicom_folder}"
+            )
+        return StructureSet.from_file(dicom_files[0])
+
+    def _mask_densities_by_structures(self):
+        """Create a masked density grid where voxels outside the external structure are
+        flagged and structure overrides are applied.
+
+        Returns
+        -------
+        Grid
+            A new :class:`Grid` instance containing the masked density volume.
+        """
+        if self.structure_set is None:
+            # No structures loaded; cannot mask densities
+            return self.densities
+        if self.densities is None:
+            raise ValueError("No densities Grid loaded; cannot mask densities")
+
+        densities_masked = Grid(
+            num_voxels=self.densities.num_voxels,
+            corner=self.densities.corner,
+            resolution=self.densities.resolution,
+            values=self.densities.values.copy(),  # type: ignore
+        )
+
+        # First, apply overrides for all structures with known densities
+        for roi in self.structure_set.rois:
+            if roi.density is None:
+                continue  # No override density specified
+            roi_mask = roi.mask_on_grid(self.densities)
+            densities_masked.values[roi_mask] = roi.density  # type: ignore
+
+        # Map all voxels not enclosed by the external contour or a support structure to -1
+        included_roi = self.structure_set.get_roi_by_type("EXTERNAL")
+        if not included_roi:
+            # No external-like ROI found; this is considered an error in the
+            # masking pipeline.
+            raise ValueError("No 'External' structure found in StructureSet")
+
+        # Include any support structures as well
+        included_roi += self.structure_set.get_roi_by_type("SUPPORT")
+
+        # Masks produced by ROI.mask_on_grid have shape (nz, ny, nx) so build
+        # an inclusion mask with the same shape as the density volume.
+        inclusion_mask = np.zeros(self.densities.values.shape, dtype=bool)  # type: ignore
+        for roi in included_roi:
+            roi_mask = roi.mask_on_grid(self.densities)
+            inclusion_mask |= roi_mask
+
+        densities_masked.values[~inclusion_mask] = -1.0  # type: ignore
+
+        return densities_masked
+
+    def plot_slice(
+        self, z_index: int | None = None, masked=False, ax=None, cmap: str = "gray"
+    ) -> None:
         """Plot a single axial slice of the loaded density volume.
 
         Parameters
@@ -278,10 +372,14 @@ class Exam:
             raise ValueError(
                 "No density volume loaded; call _load_dicom_series first or provide a dicom_folder to the constructor"
             )
-
-        vol = getattr(self.densities, "values", None)
-        if vol is None:
-            raise ValueError("Loaded density Grid contains no values to plot")
+        if masked:
+            vol = getattr(self.densities_masked, "values", None)
+            if vol is None:
+                raise ValueError("No masked density volume available")
+        else:
+            vol = getattr(self.densities, "values", None)
+            if vol is None:
+                raise ValueError("Loaded density Grid contains no values to plot")
 
         nz = vol.shape[0]
         if z_index is None:
