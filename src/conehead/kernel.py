@@ -1,7 +1,59 @@
+"""
+Kernel module for radiotherapy dose calculation.
+
+This module provides classes for loading and processing mono-energetic and
+poly-energetic collapsed-cone convolution kernels used in dose calculations.
+Kernels are typically generated from Monte Carlo simulations (e.g., EGSnrc)
+and describe energy deposition as a function of angle and radiological depth.
+"""
+
 import numpy as np
+from importlib.resources import files
 
 
 class KernelMono:
+    """
+    Mono-energetic collapsed-cone convolution kernel.
+
+    This class loads and processes a single-energy kernel from an EGSnrc
+    .egslst output file. The kernel describes energy deposition as a function
+    of polar angle (cone opening) and radial distance from the interaction site.
+
+    Attributes
+    ----------
+    energy : float
+        Kinetic energy of the incident beam in MeV.
+    data_raw : ndarray
+        Raw kernel data (angle, radius, deposition) from the .egslst file.
+    angles : ndarray
+        Unique polar angles (degrees) at which the kernel is sampled.
+    radii : ndarray
+        Unique radii (cm) at which the kernel is sampled.
+    kernel : ndarray, shape (n_cones, n_depths)
+        Normalized kernel values. Entry [i, j] is the dose kernel at cone i
+        and depth j, normalized such that the kernel integrates to 1.
+    radii_centres : ndarray
+        Radial bin centers (cm).
+    angles_edges : ndarray
+        Polar angle bin edges (degrees).
+    angles_centres : ndarray
+        Polar angle bin centers (degrees).
+    omegas : ndarray
+        Solid angle weights for each cone (steradian), computed from angle edges.
+
+    Parameters
+    ----------
+    egslst_path : str, optional
+        Path to the EGSnrc .egslst file. If None, raises NotImplementedError.
+
+    Raises
+    ------
+    NotImplementedError
+        If egslst_path is None (other initialization methods not yet supported).
+    ImportError
+        If the kernel data cannot be found in the .egslst file.
+    """
+
     def __init__(self, egslst_path=None) -> None:
         if egslst_path is not None:
             self._from_egslst(egslst_path)
@@ -9,32 +61,59 @@ class KernelMono:
             raise NotImplementedError
 
     def _from_egslst(self, egslst_path: str):
+        """
+        Load and process kernel data from an EGSnrc .egslst file.
+
+        This method parses the .egslst output to extract the incident beam
+        energy and the angle/radius/deposition data. It then computes bin
+        edges and centers, solid angle weights, normalizes the kernel by
+        shell volume, and ensures the kernel integrates to unity.
+
+        Parameters
+        ----------
+        egslst_path : str
+            Path to the .egslst file.
+
+        Raises
+        ------
+        ImportError
+            If "KINETIC ENERGY OF THE INCIDENT BEAM:" or the data table
+            cannot be found in the file.
+        """
         with open(egslst_path) as f:
             start = 0
             end = 0
             lines = f.readlines()
+
+            # Parse the file to find the beam energy and data table bounds
             for i, line in enumerate(lines):
                 if "KINETIC ENERGY OF THE INCIDENT BEAM:" in line:
                     self.energy = float(line.split()[-2])
                 if "angle/deg.  radius/cm" in line:
-                    start = i + 2
+                    start = i + 2  # Data starts 2 lines after header
                 if "END OF RUN" in line:
-                    end = i - 1
+                    end = i - 1  # Data ends 1 line before END OF RUN
 
             if start == 0 or end == 0:
                 raise ImportError("Kernel info could not be found in .egslst file.")
 
-            self.data_raw = np.array([l.split()[:3] for l in lines[start:end]], dtype=np.float32)
+            # Parse data table: angle, radius, deposition (first 3 columns)
+            self.data_raw = np.array(
+                [line.split()[:3] for line in lines[start:end]], dtype=np.float32
+            )
             self.angles = np.unique(self.data_raw[:, 0])
             self.radii = np.unique(self.data_raw[:, 1])
             n_cones = len(self.angles)
             n_depths = len(self.radii)
             self.kernel = self.data_raw[:, 2].reshape((n_cones, n_depths), copy=True)
 
+            # Compute bin edges and centers for radius and angle
             r_edges = np.insert(self.radii, 0, 0)
             self.radii_centres = 0.5 * (r_edges[1:] + r_edges[:-1])
             self.angles_edges = np.insert(self.angles, 0, 0)
             self.angles_centres = 0.5 * (self.angles_edges[1:] + self.angles_edges[:-1])
+
+            # Solid angle weights: Ω = 2π (cos(θ₁) - cos(θ₂))
             self.omegas = (
                 2
                 * np.pi
@@ -44,9 +123,89 @@ class KernelMono:
                 )
             )
 
+            # Normalize kernel by shell volume: dV = (r₂³ - r₁³)/3 · dΩ
             for i in range(self.kernel.shape[0]):
                 dR = (r_edges[1:] ** 3 - r_edges[:-1] ** 3) / 3
                 dPhi = self.omegas
                 self.kernel[i, :] = self.kernel[i, :] / (dR * dPhi[i])
 
+            # Normalize so kernel integrates to 1
             self.kernel = self.kernel / self.kernel.sum()
+
+
+class Kernel:
+    """
+    Poly-energetic collapsed-cone convolution kernel.
+
+    This class combines multiple mono-energetic kernels into a single
+    poly-energetic kernel weighted by an energy spectrum. The resulting
+    kernel is used in collapsed-cone dose convolution algorithms.
+
+    Attributes
+    ----------
+    phis : ndarray
+        Polar angle bin centers (degrees) inherited from mono kernels.
+    thetas : ndarray
+        Azimuthal angle samples (degrees). Default is 16 evenly-spaced
+        angles from 0 to 360 (exclusive of 360).
+    values : ndarray, shape (n_phis, n_depths)
+        Combined poly-energetic kernel values, normalized to integrate to 1.
+        Accounts for theta sampling by dividing by the number of theta bins.
+    omegas : ndarray
+        Solid angle weights per phi bin, adjusted for theta sampling.
+
+    Parameters
+    ----------
+    settings : dict
+        Dictionary containing the energy spectrum. Expected keys:
+        - 'energy_spectrum' : dict
+            - 'energies' : list of float
+                Energy bin values in MeV (e.g., [0.5, 1.0, ..., 6.0]).
+            - 'weights' : list of float
+                Corresponding normalized weights for each energy bin.
+
+    Notes
+    -----
+    The class loads 12 mono-energetic kernels (0.5 MeV to 6.0 MeV in 0.5 MeV
+    steps) and combines them using the provided energy spectrum. The
+    azimuthal sampling uses 16 theta angles uniformly distributed around the
+    cone axis; the kernel value is divided by the number of theta samples to
+    ensure correct integration over the full solid angle.
+    """
+
+    def __init__(self, settings: dict) -> None:
+        # Load mono-energetic kernels for 0.5 MeV to 6.0 MeV (12 kernels)
+        kernels = [
+            KernelMono(files("conehead.kernels").joinpath("0.5MeV/0.5MeV.egslst")),
+            KernelMono(files("conehead.kernels").joinpath("1.0MeV/1.0MeV.egslst")),
+            KernelMono(files("conehead.kernels").joinpath("1.5MeV/1.5MeV.egslst")),
+            KernelMono(files("conehead.kernels").joinpath("2.0MeV/2.0MeV.egslst")),
+            KernelMono(files("conehead.kernels").joinpath("2.5MeV/2.5MeV.egslst")),
+            KernelMono(files("conehead.kernels").joinpath("3.0MeV/3.0MeV.egslst")),
+            KernelMono(files("conehead.kernels").joinpath("3.5MeV/3.5MeV.egslst")),
+            KernelMono(files("conehead.kernels").joinpath("4.0MeV/4.0MeV.egslst")),
+            KernelMono(files("conehead.kernels").joinpath("4.5MeV/4.5MeV.egslst")),
+            KernelMono(files("conehead.kernels").joinpath("5.0MeV/5.0MeV.egslst")),
+            KernelMono(files("conehead.kernels").joinpath("5.5MeV/5.5MeV.egslst")),
+            KernelMono(files("conehead.kernels").joinpath("6.0MeV/6.0MeV.egslst")),
+        ]
+
+        # Combine kernels weighted by energy spectrum
+        kernel = np.zeros_like(kernels[0].kernel, dtype=np.float32)
+        for i in range(len(settings["energy_spectrum"]["energies"])):
+            kernel += (
+                kernels[i].kernel
+                * settings["energy_spectrum"]["weights"][i]
+                * settings["energy_spectrum"]["energies"][i]
+            )
+        kernel = kernel / kernel.sum()  # Normalize to integrate to 1
+
+        # Store phi (polar) angles and values
+        self.phis = kernels[0].angles_centres
+
+        # Azimuthal (theta) sampling: 16 evenly-spaced angles around cone axis
+        self.thetas = np.linspace(0, 360 - (360 / 16), 16, dtype=np.float32)
+
+        # Account for theta sampling in kernel values and solid angle weights
+        self.values = kernel / len(self.thetas)
+        self.omegas = (kernels[0].omegas / len(self.thetas)).astype(np.float32)
