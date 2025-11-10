@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+import numpy as np
+import numpy.typing as npt
 import pydicom
 from pydicom.dataset import Dataset as PydicomDataset
 
@@ -18,30 +20,30 @@ class ControlPoint:
     """
 
     index: int
-    gantry_angle: Optional[float] = None
-    collimator_angle: Optional[float] = None
-    couch_angle: Optional[float] = None
-    nominal_beam_energy: Optional[float] = None
-    x_jaw_positions: Optional[List[float]] = None
-    y_jaw_positions: Optional[List[float]] = None
-    mlc_positions: Optional[Any] = None
-    isocenter_position: Optional[List[float]] = None
-    raw: Optional[PydicomDataset] = None
+    mlc_positions: npt.NDArray[np.float32]
+    jaw_x_positions: npt.NDArray[np.float32]
+    jaw_y_positions: npt.NDArray[np.float32]
+    gantry: np.float32
+    collimator: np.float32
+    couch: np.float32
+    nominal_beam_energy: Optional[np.float32] = None
+    isocenter_position: Optional[npt.NDArray[np.float32]] = None
 
 
 @dataclass
 class Beam:
     """Summary of a single beam within an RT Plan."""
 
-    number: Optional[int]
-    name: Optional[str]
-    type: Optional[str]
-    mu: Optional[float] = None
-    dose: Optional[float] = None
-    dose_spec_point: Optional[List[float]] = None
-    isocenter_position: Optional[List[float]] = None
+    number: int
+    name: str
+    type: str
+    mu: np.float32
+    mlc_boundaries: npt.NDArray[np.float32]
+    isocenter_position: npt.NDArray[np.float32]
     control_points: List[ControlPoint] = field(default_factory=list)
-    raw: Optional[PydicomDataset] = None
+    dose_values: Optional[npt.NDArray[np.float32]] = None
+    dose_spec_value: Optional[np.float32] = None
+    dose_spec_point: Optional[npt.NDArray[np.float32]] = None
 
 
 @dataclass
@@ -82,6 +84,9 @@ class Plan:
             self._parse_dataset(self.dataset)
 
     def _parse_dataset(self, ds: PydicomDataset) -> None:
+        # All numerical lists/values converted to np.float32 ndarrays.
+        # Also converted to cm from DICOM mm.
+
         # Basic patient / plan metadata
         self.plan_label = getattr(ds, "RTPlanLabel", None) or getattr(ds, "RTPlanName", None)
         self.plan_date = getattr(ds, "RTPlanDate", None)
@@ -122,32 +127,38 @@ class Plan:
         self.beams = []
         for b in beam_seq:
             number = getattr(b, "BeamNumber", None)
+            if number is None:
+                raise ValueError("BeamNumber is missing from a BeamSequence item.")
             name = getattr(b, "BeamName", None)
-            btype = getattr(b, "BeamType", None)
+            if name is None:
+                raise ValueError("BeamName is missing from a BeamSequence item.")
+            type = getattr(b, "BeamType", None)
+            if type is None:
+                raise ValueError("BeamType is missing from a BeamSequence item.")
 
-            # default referenced values
-            dose_spec_point = None
-            dose = None
-            mu = None
+            # Default referenced values
             for r in ref_beam_seq:
                 ref_number = getattr(r, "ReferencedBeamNumber", None)
                 if ref_number == number:
                     # Found matching referenced beam
                     dose_spec_point = getattr(r, "BeamDoseSpecificationPoint", None)
-                    dose = getattr(r, "BeamDose", None)
+                    if dose_spec_point is not None:
+                        dose_spec_point = (
+                            np.array(dose_spec_point, dtype=np.float32) * 0.1
+                        )  # mm to cm
+                    dose_spec_value = getattr(r, "BeamDose", None)
                     mu = getattr(r, "BeamMeterset", None)
+                    if mu is None:
+                        raise ValueError("BeamMeterset is missing from ReferencedBeamSequence.")
                     break
 
-            beam = Beam(
-                number=number,
-                name=name,
-                type=btype,
-                mu=mu,
-                dose=dose,
-                dose_spec_point=dose_spec_point,
-                raw=b,
-            )
+            # Get boundaries of MLCs
+            for collimator in b.BeamLimitingDeviceSequence:
+                if collimator.RTBeamLimitingDeviceType == "MLCX":
+                    mlc_boundaries = collimator.LeafPositionBoundaries
+                    mlc_boundaries = np.array(mlc_boundaries, dtype=np.float32) * 0.1  # mm to cm
 
+            control_points = []
             # Control points live in ControlPointSequence
             cps = getattr(b, "ControlPointSequence", None) or []
             for i, cp in enumerate(cps):
@@ -165,8 +176,8 @@ class Plan:
                 # Jaw positions and MLC positions
                 bld_seq = getattr(cp, "BeamLimitingDevicePositionSequence", None)
                 # initialize jaw/mlc containers per control point
-                x_jaw_positions = None
-                y_jaw_positions = None
+                jaw_x_positions = None
+                jaw_y_positions = None
                 mlc_positions = None
                 if bld_seq is not None:
                     for dev in bld_seq:
@@ -175,10 +186,14 @@ class Plan:
                         if pos is not None:
                             vals.extend(list(pos))
                         dev_type = getattr(dev, "RTBeamLimitingDeviceType", None)
-                        if dev_type == "ASYMX":
-                            x_jaw_positions = vals
+                        if dev_type is None:
+                            raise ValueError(
+                                "RTBeamLimitingDeviceType is missing in BeamLimitingDevicePositionSequence"
+                            )
+                        elif dev_type == "ASYMX":
+                            jaw_x_positions = vals
                         elif dev_type == "ASYMY":
-                            y_jaw_positions = vals
+                            jaw_y_positions = vals
                         elif dev_type == "MLCX":
                             mlc_positions = vals
                         else:
@@ -190,30 +205,44 @@ class Plan:
 
                 # Unit conversion from mm to cm
                 if isocenter_position is not None:
-                    isocenter_position = [x * 0.1 for x in isocenter_position]
-                if x_jaw_positions is not None:
-                    x_jaw_positions = [x * 0.1 for x in x_jaw_positions]
-                if y_jaw_positions is not None:
-                    y_jaw_positions = [x * 0.1 for x in y_jaw_positions]
+                    isocenter_position = np.array(isocenter_position, dtype=np.float32) * 0.1
+                if jaw_x_positions is None:
+                    # Enforce a default jaw position
+                    jaw_x_positions = np.array([-20.0, 20.0], dtype=np.float32)  # default +/- 20 cm
+                else:
+                    jaw_x_positions = np.array(jaw_x_positions, dtype=np.float32) * 0.1
+                if jaw_y_positions is None:
+                    # Enforce a default jaw position
+                    jaw_y_positions = np.array([-20.0, 20.0], dtype=np.float32)  # default +/- 20 cm
+                else:
+                    jaw_y_positions = np.array(jaw_y_positions, dtype=np.float32) * 0.1
                 if mlc_positions is not None:
-                    mlc_positions = [x * 0.1 for x in mlc_positions]
+                    mlc_positions = np.array(mlc_positions, dtype=np.float32) * 0.1
 
-                # Keep raw cp for advanced inspection
                 control = ControlPoint(
                     index=i,
-                    gantry_angle=gantry,
-                    collimator_angle=coll,
-                    couch_angle=couch,
+                    gantry=np.float32(gantry),
+                    collimator=np.float32(coll),
+                    couch=np.float32(couch),
                     nominal_beam_energy=energy,
-                    x_jaw_positions=x_jaw_positions,
-                    y_jaw_positions=y_jaw_positions,
-                    mlc_positions=mlc_positions,
+                    jaw_x_positions=jaw_x_positions,
+                    jaw_y_positions=jaw_y_positions,
+                    mlc_positions=mlc_positions,  # type: ignore
                     isocenter_position=isocenter_position,
-                    raw=cp,
                 )
-                beam.control_points.append(control)
-                beam.isocenter_position = beam.control_points[0].isocenter_position
+                control_points.append(control)
 
+            beam = Beam(
+                number=number,
+                name=name,
+                type=type,
+                mu=np.float32(mu),
+                dose_spec_value=np.float32(dose_spec_value),
+                dose_spec_point=dose_spec_point,
+                mlc_boundaries=mlc_boundaries,
+                control_points=control_points,
+                isocenter_position=control_points[0].isocenter_position,
+            )
             self.beams.append(beam)
 
     def summary(self) -> Dict[str, Any]:
