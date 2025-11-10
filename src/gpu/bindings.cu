@@ -22,8 +22,7 @@ PYBIND11_MODULE(conehead_gpu, m)
     m.def("fluence", &map_fluence, py::arg("fluence_grid"), py::arg("fluence_map_pri"),
         py::arg("fluence_map_sec"), py::arg("num_voxels"), py::arg("corner"), py::arg("resolution"),
         py::arg("d_geo_grid"), py::arg("source_position"), py::arg("source_v_x"), py::arg("source_v_y"),
-        py::arg("source_v_z"), py::arg("source_sad"), py::arg("pri_s"), py::arg("pri_x"), py::arg("pri_y"),
-        py::arg("pri_z"), py::arg("sec_s"), py::arg("sec_x"), py::arg("sec_y"), py::arg("sec_z"),
+        py::arg("source_v_z"), py::arg("source_sad"), py::arg("pri_z"), py::arg("sec_z"),
         py::arg("samples"));
     m.def("terma", &map_terma, py::arg("terma_grid"), py::arg("fluence_grid"), py::arg("d_geo_grid"),
         py::arg("d_eff_grid"), py::arg("num_voxels"), py::arg("num_energies"), py::arg("energies"),

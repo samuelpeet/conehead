@@ -40,8 +40,8 @@ __global__ void fluence(float* fluence_grid,
     float* source_v_y,
     float* source_v_z,
     float source_sad,
-    float pri_s, float pri_x, float pri_y, float pri_z,
-    float sec_s, float sec_x, float sec_y, float sec_z,
+    float pri_z,
+    float sec_z,
     int samples);
 
 __global__ void terma(float* terma_grid,
@@ -108,8 +108,7 @@ void map_fluence(pybind11::array_t<float> fluence_grid,
     pybind11::array_t<float> resolution, pybind11::array_t<float> d_geo_grid,
     pybind11::array_t<float> source_position, pybind11::array_t<float> source_v_x, pybind11::array_t<float> source_v_y,
     pybind11::array_t<float> source_v_z, float source_sad,
-    float pri_s, float pri_x, float pri_y, float pri_z,
-    float sec_s, float sec_x, float sec_y, float sec_z,
+    float pri_z, float sec_z,
     int samples);
 
 void map_terma(
