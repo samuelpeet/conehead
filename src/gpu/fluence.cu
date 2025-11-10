@@ -38,8 +38,8 @@
  * @param source_v_y           Device pointer to float[3] source basis vector Y (plane normal).
  * @param source_v_z           Device pointer to float[3] source basis vector Z.
  * @param source_sad           Source-to-axis distance used in rescaling.
- * @param pri_s, pri_x,y,z     Primary-map scale/offset parameters (pri_z used in inverse-square).
- * @param sec_s, sec_x,y,z     Secondary-map scale/offset parameters.
+ * @param pri_z                Primary fluence map z coord (used in inverse-square).
+ * @param sec_z                Secondary fluence map z coord.
  * @param samples              Supersampling factor per axis (1 = no supersampling).
  *
  * @note The fluence map lookup mapping (cm->mm, +280 offset) preserves the
@@ -58,8 +58,8 @@ __global__ void fluence(float* fluence_grid,
     float* source_v_y,
     float* source_v_z,
     float source_sad,
-    float pri_s, float pri_x, float pri_y, float pri_z,
-    float sec_s, float sec_x, float sec_y, float sec_z,
+    float pri_z,
+    float sec_z,
     int samples)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -165,8 +165,8 @@ __global__ void fluence(float* fluence_grid,
  * @param source_v_y         NumPy array float[3] source basis vector Y (plane normal).
  * @param source_v_z         NumPy array float[3] source basis vector Z.
  * @param source_sad         Source-to-axis distance used in rescaling.
- * @param pri_s, pri_x,y,z   Primary-map scale/offset parameters (pri_z used in inverse-square).
- * @param sec_s, sec_x,y,z   Secondary-map scale/offset parameters.
+ * @param pri_z              Primary fluence map z coord (pri_z used in inverse-square).
+ * @param sec_z              Secondary fluence map z coord (sec_z used in inverse-square).
  * @param samples            Supersampling factor per axis (1 = no supersampling).
  *
  * @note The wrapper creates temporary device-side textures and buffers and
@@ -178,9 +178,7 @@ void map_fluence(pybind11::array_t<float> fluence_grid, pybind11::array_t<float>
     pybind11::array_t<float> corner, pybind11::array_t<float> resolution, pybind11::array_t<float> d_geo_grid,
     pybind11::array_t<float> source_position, pybind11::array_t<float> source_v_x, pybind11::array_t<float> source_v_y,
     pybind11::array_t<float> source_v_z, float source_sad,
-    float pri_s, float pri_x, float pri_y, float pri_z,
-    float sec_s, float sec_x, float sec_y, float sec_z,
-    int samples)
+    float pri_z, float sec_z, int samples)
 {
     pybind11::buffer_info fluence_grid_info = fluence_grid.request();
     pybind11::buffer_info fluence_map_pri_info = fluence_map_pri.request();
@@ -243,7 +241,7 @@ void map_fluence(pybind11::array_t<float> fluence_grid, pybind11::array_t<float>
     // Pass texture objects for the fluence maps and d_geo
     fluence<<<dimGrid, dimBlock>>>(d_fluence_grid, fluence_map_pri_tex, fluence_map_sec_tex, d_num_voxels, d_corner,
         d_resolution, d_geo_tex, d_source_position, d_source_v_x_ptr, d_source_v_y_ptr, d_source_v_z_ptr,
-        source_sad, pri_s, pri_x, pri_y, pri_z, sec_s, sec_x, sec_y, sec_z, samples);
+        source_sad, pri_z, sec_z, samples);
 
     // Copy result back to host
     cudaMemcpy(fluence_grid_ptr, d_fluence_grid,
