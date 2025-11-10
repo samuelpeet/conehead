@@ -8,6 +8,8 @@ import numpy.typing as npt
 import pydicom
 from pydicom.dataset import Dataset as PydicomDataset
 
+from conehead.grid import Grid
+
 
 @dataclass
 class ControlPoint:
@@ -41,7 +43,7 @@ class Beam:
     mlc_boundaries: npt.NDArray[np.float32]
     isocenter_position: npt.NDArray[np.float32]
     control_points: List[ControlPoint] = field(default_factory=list)
-    dose_values: Optional[npt.NDArray[np.float32]] = None
+    dose: Optional[Grid] = None
     dose_spec_value: Optional[np.float32] = None
     dose_spec_point: Optional[npt.NDArray[np.float32]] = None
 
@@ -74,6 +76,7 @@ class Plan:
     patient_sex: Optional[str] = None
     delivery_method: Optional[str] = None
     beams: List[Beam] = field(default_factory=list)
+    plan_instance_uid: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.path and self.dataset is None:
@@ -92,6 +95,7 @@ class Plan:
         self.plan_date = getattr(ds, "RTPlanDate", None)
         self.plan_manufacturer = getattr(ds, "Manufacturer", None)
         self.delivery_method = getattr(ds, "TreatmentProtocols", None)
+        self.plan_instance_uid = getattr(ds, "SOPInstanceUID", None)
 
         pn = getattr(ds, "PatientName", None)
         self.patient_name = str(pn) if pn is not None else None

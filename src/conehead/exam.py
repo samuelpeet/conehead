@@ -114,9 +114,9 @@ class Exam:
             # DICOM loading requires an HU->density LUT
             if self.hu_lut is None:
                 raise ValueError("hu_lut_path is required when dicom_folder is provided")
-            self.densities = self._load_dicom_series(dicom_folder)
-            self.structure_set = self._load_structure_set(dicom_folder)
-            self.densities_masked = self._mask_densities_by_structures()
+            self._load_dicom_series(dicom_folder)
+            self._load_structure_set(dicom_folder)
+            self._mask_densities_by_structures()
 
     def _load_hu_lut(self, hu_lut_path: str) -> dict:
         """Load an HU->density lookup table from a TOML file.
@@ -199,11 +199,15 @@ class Exam:
                 )
         dicom_files.sort(key=lambda x: float(x.ImagePositionPatient[2]))
 
-        # Get image dimensions and spacing from the first slice
+        # Get image dimensions, spacing, and metadata from the first slice
         first_slice = dicom_files[0]
+
         # Validate required tags on first slice
         required = [
-            "Rows",
+            "StudyInstanceUID",
+            "StudyDate",
+            "StudyTime",
+            "StudyID",
             "Columns",
             "SliceThickness",
             "PixelSpacing",
@@ -213,6 +217,11 @@ class Exam:
         for tag in required:
             if not hasattr(first_slice, tag):
                 raise ValueError(f"First DICOM slice missing required tag: {tag}")
+
+        self.study_instance_uid = first_slice.StudyInstanceUID
+        self.study_date = first_slice.StudyDate
+        self.study_time = first_slice.StudyTime
+        self.study_id = first_slice.StudyID
 
         rows = first_slice.Rows
         cols = first_slice.Columns
@@ -251,7 +260,7 @@ class Exam:
             [pixel_spacing[0], pixel_spacing[1], slice_thickness], dtype=np.float32
         )  # dx, dy, dz
         resolution *= 0.1  # convert from mm to cm
-        return Grid(
+        self.densities = Grid(
             num_voxels=num_voxels,
             corner=corner,
             resolution=resolution,
@@ -295,7 +304,7 @@ class Exam:
             raise ValueError(
                 f"Multiple RT Structure Set DICOM files found in folder: {dicom_folder}"
             )
-        return StructureSet.from_file(dicom_files[0])
+        self.structure_set = StructureSet.from_file(dicom_files[0])
 
     def _mask_densities_by_structures(self):
         """Create a masked density grid where voxels outside the external structure are
@@ -312,7 +321,7 @@ class Exam:
         if self.densities is None:
             raise ValueError("No densities Grid loaded; cannot mask densities")
 
-        densities_masked = Grid(
+        self.densities_masked = Grid(
             num_voxels=self.densities.num_voxels,
             corner=self.densities.corner,
             resolution=self.densities.resolution,
@@ -324,7 +333,7 @@ class Exam:
             if roi.density is None:
                 continue  # No override density specified
             roi_mask = roi.mask_on_grid(self.densities)
-            densities_masked.values[roi_mask] = roi.density  # type: ignore
+            self.densities_masked.values[roi_mask] = roi.density  # type: ignore
 
         # Map all voxels not enclosed by the external contour or a support structure to -1
         included_roi = self.structure_set.get_roi_by_type("EXTERNAL")
@@ -343,9 +352,7 @@ class Exam:
             roi_mask = roi.mask_on_grid(self.densities)
             inclusion_mask |= roi_mask
 
-        densities_masked.values[~inclusion_mask] = -1.0  # type: ignore
-
-        return densities_masked
+        self.densities_masked.values[~inclusion_mask] = -1.0  # type: ignore
 
     def plot_slice(
         self, z_index: int | None = None, masked=False, ax=None, cmap: str = "gray"
