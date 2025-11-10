@@ -147,8 +147,11 @@ def export_dose(
         rows = int(dose.num_voxels[1])  # ny
         cols = int(dose.num_voxels[0])  # nx
         n_frames = int(dose.num_voxels[2])  # nz
-        # DICOM SliceThickness is expressed in mm
-        slice_thickness = float(dose.resolution[2]) * 10.0  # cm -> mm
+        # voxel sizes in cm -> convert to mm
+        dx_mm = float(dose.resolution[0]) * 10.0
+        dy_mm = float(dose.resolution[1]) * 10.0
+        dz_mm = float(dose.resolution[2]) * 10.0
+        slice_thickness = dz_mm
         ds.SliceThickness = slice_thickness
         ds.SoftwareVersions = "alpha"
 
@@ -159,8 +162,18 @@ def export_dose(
         ds.InstanceNumber = str(i + 1)
 
         # Spatial orientation/position
-        ds.ImagePositionPatient = tuple(float(x) for x in dose.corner)
-        ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+        # Our Grid.corner is the corner of the most-negative voxel (not the centre),
+        # so ImagePositionPatient (which should point to the first voxel centre)
+        # must add half a voxel in each axis before converting to mm.
+        ip_x = float(dose.corner[0]) + 0.5 * float(dose.resolution[0])
+        ip_y = float(dose.corner[1]) + 0.5 * float(dose.resolution[1])
+        ip_z = float(dose.corner[2]) + 0.5 * float(dose.resolution[2])
+        ds.ImagePositionPatient = [ip_x * 10.0, ip_y * 10.0, ip_z * 10.0]  # cm -> mm
+
+        # Orientation: (row direction vector, column direction vector)
+        # For an axis-aligned grid where +x corresponds to increasing column index
+        # and +y to increasing row index:
+        ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
         ds.FrameOfReferenceUID = frame_of_reference_uid
 
         # Pixel data descriptors
@@ -170,8 +183,8 @@ def export_dose(
         ds.FrameIncrementPointer = (0x3004, 0x000C)
         ds.Rows = rows
         ds.Columns = cols
-        # PixelSpacing in mm: (dx, dy)
-        ds.PixelSpacing = [float(dose.resolution[0] * 10.0), float(dose.resolution[1] * 10.0)]
+        # PixelSpacing in mm: [row_spacing, column_spacing] per DICOM convention
+        ds.PixelSpacing = [dy_mm, dx_mm]
         ds.BitsAllocated = 16
         ds.BitsStored = 16
         ds.HighBit = 15
@@ -183,7 +196,9 @@ def export_dose(
         ds.DoseComment = ""
         ds.DoseSummationType = "BEAM"
         # GridFrameOffsetVector: offsets for each frame in mm
-        ds.GridFrameOffsetVector = [float(i * slice_thickness) for i in range(n_frames)]
+        # GridFrameOffsetVector: offsets (mm) for each frame measured from ImagePositionPatient.
+        # Because ImagePositionPatient is the centre of frame 0, offsets are k * slice_thickness.
+        ds.GridFrameOffsetVector = [float(k) * slice_thickness for k in range(n_frames)]
         ds.TissueHeterogeneityCorrection = ["IMAGE", "ROI_OVERRIDE"]
 
         # ---------------------- Referenced sequences ------------------
