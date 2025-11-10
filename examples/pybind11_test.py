@@ -66,7 +66,7 @@ x_target = np.linspace(-28.0, 28.0, 560)  # 560 points from -28 to 28
 y_target = np.linspace(-28.0, 28.0, 560)  # 560 points from -28 to 28
 X_target, Y_target = np.meshgrid(x_target, y_target)
 interpolator = RegularGridInterpolator(
-    (x_orig, y_orig), block.block_values, method="linear", bounds_error=False, fill_value=0
+    (x_orig, y_orig), block.values, method="linear", bounds_error=False, fill_value=0
 )
 points_target = np.array([X_target.ravel(), Y_target.ravel()]).T
 block_interpolated = interpolator(points_target)
