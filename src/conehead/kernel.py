@@ -209,3 +209,9 @@ class Kernel:
         # Account for theta sampling in kernel values and solid angle weights
         self.values = kernel / len(self.thetas)
         self.omegas = (kernels[0].omegas / len(self.thetas)).astype(np.float32)
+
+        # Store depth binning info
+        self.n_depth_bins = np.int32(1192)
+        self.kernel_depth_res_cm = np.float32(0.05)
+        self.max_kernel_depth_cm = np.float32(59.6)
+        self.ds_cm = np.float32(0.05)
