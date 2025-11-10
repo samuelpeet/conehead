@@ -1,6 +1,10 @@
+from typing import Tuple
 import numpy as np
 import numpy.typing as npt
-from pydicom.dataset import FileDataset
+from conehead.plan import Beam, ControlPoint
+from pydicom.dataset import Dataset as PydicomDataset
+from scipy.ndimage import gaussian_filter
+from scipy.interpolate import RegularGridInterpolator, make_interp_spline
 
 
 class VarianLeaf:
@@ -76,15 +80,16 @@ class VarianLeaf:
 class Block:
     def __init__(
         self,
+        settings: dict,
         rotation: npt.NDArray[np.float32] = np.array([0, 0, 0], dtype=np.float32),
-        plan: FileDataset | None = None,
-        settings: dict | None = None,
+        control_point: ControlPoint | None = None,
     ):
         self.rotation = rotation
-        if plan and settings:
-            if settings["mlc"]["mlc_model"] != "Millennium120":
+        self.settings = settings
+        if control_point and settings:
+            if settings["collimators"]["mlc"]["mlc_model"] != "Millennium120":
                 raise NotImplementedError("Only Millennium 120 MLC is currently implemented.")
-            self._set_from_plan(plan, settings)
+            self._set_from_control_point(control_point, settings)
         else:
             self.xmin: np.float32 = np.float32(-20)
             self.xmax: np.float32 = np.float32(20)
@@ -94,10 +99,7 @@ class Block:
             self.ymax: np.float32 = np.float32(20)
             self.ynum: np.int32 = np.int32(4000)
             self.yres: np.float32 = self.ynum / (self.ymax - self.ymin)
-            self.block_locations: npt.NDArray[np.float32] = np.mgrid[
-                self.xmin : self.xmax : self.xnum * 1j, self.ymin : self.ymax : self.ynum * 1j
-            ].astype(np.float32)
-            self.block_values: npt.NDArray[np.float32] = np.zeros(
+            self.values: npt.NDArray[np.float32] = np.zeros(
                 (self.xnum, self.ynum), dtype=np.float32
             )
 
@@ -110,49 +112,26 @@ class Block:
             Side length of square opening
         """
         # Clear previous aperture
-        self.block_values.fill(np.float32(0))
+        self.values.fill(np.float32(0))
 
         # Set square collimator opening
         x1 = int((self.xnum / 2) - (length / 2) * self.xres)
         x2 = int((self.xnum / 2) + (length / 2) * self.xres)
         y1 = int((self.ynum / 2) - (length / 2) * self.yres)
         y2 = int((self.ynum / 2) + (length / 2) * self.yres)
-        self.block_values[x1:x2, y1:y2] = np.float32(1)
+        self.values[x1:x2, y1:y2] = np.float32(1)
 
         self.x1_jaw_pos = -length / 2
         self.x2_jaw_pos = length / 2
         self.y1_jaw_pos = -length / 2
         self.y2_jaw_pos = length / 2
 
-    def _set_from_plan(self, plan: FileDataset, settings: dict):
-        # Extract info from plan
-        for beam in plan.BeamSequence:
-            if beam.BeamType != "STATIC":
-                raise NotImplementedError(
-                    "Only beams with type 'STATIC' are currently implemented."
-                )
-
-            # Get boundaries of MLCs
-            for collimator in beam.BeamLimitingDeviceSequence:
-                if collimator.RTBeamLimitingDeviceType == "MLCX":
-                    mlc_boundaries: npt.NDArray[np.float32] = np.array(
-                        collimator.LeafPositionBoundaries, dtype=np.float32
-                    )
-
-            # Get jaw and MLC positions
-            for collimator in beam.ControlPointSequence[0].BeamLimitingDevicePositionSequence:
-                if collimator.RTBeamLimitingDeviceType in ("X", "ASYMX"):
-                    jaw_x_positions: npt.NDArray[np.float32] = np.array(collimator.LeafJawPositions)
-                if collimator.RTBeamLimitingDeviceType in ("Y", "ASYMY"):
-                    jaw_y_positions: npt.NDArray[np.float32] = np.array(collimator.LeafJawPositions)
-                elif collimator.RTBeamLimitingDeviceType == "MLCX":
-                    mlc_ends: npt.NDArray[np.float32] = np.array(collimator.LeafJawPositions)
-
-        # Convert to tenths of a millimetre
-        mlc_boundaries: npt.NDArray[np.float32] = np.floor(mlc_boundaries * 10)
-        mlc_ends: npt.NDArray[np.float32] = np.floor(mlc_ends * 10)
-        jaw_x_positions: npt.NDArray[np.float32] = np.floor(jaw_x_positions * 10)
-        jaw_y_positions: npt.NDArray[np.float32] = np.floor(jaw_y_positions * 10)
+    def _set_from_control_point(self, control_point: ControlPoint, settings: dict):
+        # Convert from cm to tenths of a mm
+        mlc_boundaries = control_point.mlc_positions * 100
+        mlc_ends = np.floor(control_point.mlc_positions * 100)
+        jaw_x_positions = np.floor(control_point.jaw_x_positions * 100)
+        jaw_y_positions = np.floor(control_point.jaw_y_positions * 100)
 
         # Identify A and B bank ends
         mlc_offset = np.float32(
@@ -185,7 +164,7 @@ class Block:
             leaves.append(leaf)
 
         # Slice each MLC leaf into the block plane.
-        self.block_values = np.ones(
+        self.values = np.ones(
             (int(np.abs(mlc_boundaries[0] - mlc_boundaries[-1])), 4000), dtype=np.float32
         )
         for i, leaf in enumerate(leaves):
@@ -198,7 +177,7 @@ class Block:
             #     x2 = leaf.r_max
             #     y1 = leaf.c_min
             #     y2 = leaf.c_max
-            #     self.block_values[x1:x2, y1:y2] *= np.fliplr(
+            #     self.values[x1:x2, y1:y2] *= np.fliplr(
             #         leaf.area[x1_offset : (leaf.r_max - leaf.r_min - x2_offset), :]
             #     )
             #     continue
@@ -217,14 +196,90 @@ class Block:
                 x2 = 3999
             y1 = leaf.c_min
             y2 = leaf.c_max
-            self.block_values[x1:x2, y1:y2] *= np.fliplr(
+            self.values[x1:x2, y1:y2] *= np.fliplr(
                 leaf.area[x1_offset : (leaf.r_max - leaf.r_min - x2_offset), :]
             )
 
         # Include jaws in block plane
         x_trans = settings["collimators"]["x_jaw_trans"]
         y_trans = settings["collimators"]["y_jaw_trans"]
-        self.block_values[:, : int(2000 + jaw_x_positions[0])] *= x_trans
-        self.block_values[:, int(2000 + jaw_x_positions[1]) :] *= x_trans
-        self.block_values[: int(2000 / 2 + jaw_y_positions[0]), :] *= y_trans
-        self.block_values[int(2000 / 2 + jaw_y_positions[1]) :, :] *= y_trans
+        self.values[:, : int(2000 + jaw_x_positions[0])] *= x_trans
+        self.values[:, int(2000 + jaw_x_positions[1]) :] *= x_trans
+        self.values[: int(2000 + jaw_y_positions[0]), :] *= y_trans
+        self.values[int(2000 + jaw_y_positions[1]) :, :] *= y_trans
+
+    def get_fluence_maps(self) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
+        # Extract source parameters from settings
+        sources = self.settings.get("sources", None)
+        if sources is None:
+            raise ValueError("Block settings do not contain 'sources' information.")
+        pri_s = sources.get("pri_s")
+        pri_x = sources.get("pri_x")
+        pri_y = sources.get("pri_y")
+        sec_s = sources.get("sec_s")
+        sec_x = sources.get("sec_x")
+        sec_y = sources.get("sec_y")
+        if (
+            pri_s is None
+            or pri_x is None
+            or pri_y is None
+            or sec_s is None
+            or sec_x is None
+            or sec_y is None
+        ):
+            raise ValueError("Block settings 'sources' missing required fields.")
+        bpc = self.settings.get("beam_profile_correction")
+        if bpc is None:
+            raise ValueError("Block settings do not contain 'beam_profile_correction' information.")
+        oads = bpc.get("oads")
+        factors = bpc.get("factors")
+        if oads is None or factors is None:
+            raise ValueError("Block settings 'beam_profile_correction' missing required fields.")
+
+        # Define original high res dimensions of the block plane
+        x_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
+        y_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
+
+        # Define the lower res dimensions of the fluence map to interpolate onto
+        x_target = np.linspace(-28.0, 28.0, 560)  # 560 points from -28 to 28
+        y_target = np.linspace(-28.0, 28.0, 560)  # 560 points from -28 to 28
+
+        # Perform interpolation from original res to target res
+        X_target, Y_target = np.meshgrid(x_target, y_target)
+        interpolator = RegularGridInterpolator(
+            (x_orig, y_orig), self.values, method="linear", bounds_error=False, fill_value=0
+        )
+        points_target = np.array([X_target.ravel(), Y_target.ravel()]).T
+        block_interpolated = interpolator(points_target)
+        block_interpolated_2d = block_interpolated.reshape(X_target.shape)
+
+        # Apply Gaussian filtering to simulate source size
+        pixel_pitch_cm = 0.1  # cm
+        sigma_pix_x = pri_x / pixel_pitch_cm
+        sigma_pix_y = pri_y / pixel_pitch_cm
+        pri_fluence = gaussian_filter(
+            block_interpolated_2d, sigma=(sigma_pix_x, sigma_pix_y), mode="nearest"
+        )
+        sigma_pix_x = sec_x / pixel_pitch_cm
+        sigma_pix_y = sec_y / pixel_pitch_cm
+        sec_fluence = gaussian_filter(
+            block_interpolated_2d, sigma=(sigma_pix_x, sigma_pix_y), mode="nearest"
+        )
+
+        # Determine beam profile correction as a function of radius
+        bpc_interp = make_interp_spline(
+            oads,
+            factors,
+            k=1,
+        )
+        x = np.arange(-28, 28, 0.1, dtype=np.float32)
+        y = np.arange(-28, 28, 0.1, dtype=np.float32)
+        X, Y = np.meshgrid(x, y)
+        r = np.sqrt(X**2 + Y**2)
+        bpc = bpc_interp(r)
+
+        # Calculate final fluence maps
+        fluence_map_pri = pri_s * pri_fluence * bpc
+        fluence_map_sec = sec_s * sec_fluence
+
+        return (fluence_map_pri.astype(np.float32), fluence_map_sec.astype(np.float32))
