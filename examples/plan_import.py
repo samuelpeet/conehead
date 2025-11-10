@@ -170,6 +170,11 @@ if plan.delivery_method == "SMLC":
         ).astype(np.float32)
         N = np.float32(settings["calculation"]["normalisation"])
         MU = beam.mu
-        beam.dose_values = dose_grid * ofc * N * MU
 
+        beam.dose = Grid(
+            corner=grid.corner,
+            resolution=grid.resolution,
+            num_voxels=grid.num_voxels,
+            values=dose_grid * ofc * N * MU,
+        )
 # %%
