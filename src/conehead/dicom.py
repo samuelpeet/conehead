@@ -91,9 +91,14 @@ def export_dose(
 
         # Build filename
         if beam_name_in_file_name and getattr(beam, "name", None):
-            filename = f"{output_dir}/RD_{beam.name}.dcm"
+            filename = f"{output_dir}/RD_{plan.plan_label}_{beam.name}.dcm"
         else:
             filename = f"{output_dir}/RD{instance_uid}.dcm"
+
+        # Sanitise filename by replacing potentially problematic characters
+        invalid_chars = '/\\?%*:|"<> '
+        for char in invalid_chars:
+            filename = filename.replace(char, "_")
 
         # Help the static analyzer: the beam.dose object is a Grid
         dose: Grid = cast(Grid, beam.dose)
