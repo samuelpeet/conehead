@@ -3,136 +3,57 @@
 pri_s = 0.98373769
 pri_x = 0.14093192  # cm
 pri_y = 0.14093192  # cm
-pri_z = 0.5         # cm
+pri_z = 0.5  # cm
 sec_s = 0.01626231
-sec_x = 25.26913868 # cm
-sec_y = 25.26913868 # cm
-sec_z = 20.0        # cm
+sec_x = 25.26913868  # cm
+sec_y = 25.26913868  # cm
+sec_z = 20.0  # cm
 
 [collimators]
 x_jaw_trans = 0.005
-x_jaw_z = 44.5      # cm
+x_jaw_z = 44.5  # cm
 x_jaw_offset = 0.0  # cm
 y_jaw_trans = 0.005
-y_jaw_z = 35.7      # cm
+y_jaw_z = 35.7  # cm
 y_jaw_offset = 0.0  # cm
 [collimators.mlc]
 mlc_model = "Millennium120"
-mlc_direction = "X"         # "X" or "Y"
+mlc_direction = "X"  # "X" or "Y"
 mlc_trans = 0.0115
-mlc_z = 53.8                # cm
-mlc_offset = 0.0            # cm
-mlc_z_leaf = 6.1            # cm
-mlc_z_screw = 0.33          # cm
-mlc_x_tip_end = 0.0         # cm
-mlc_x_tip_start = 0.6       # cm
-mlc_x_r = 8.0               # cm
-mlc_x_screw_start = 1.7     # cm
-mlc_y_tg = 0.042            # cm
+mlc_z = 53.8  # cm
+mlc_offset = 0.0  # cm
+mlc_z_leaf = 6.1  # cm
+mlc_z_screw = 0.33  # cm
+mlc_x_tip_end = 0.0  # cm
+mlc_x_tip_start = 0.6  # cm
+mlc_x_r = 8.0  # cm
+mlc_x_screw_start = 1.7  # cm
+mlc_y_tg = 0.042  # cm
 
 [calculation]
 normalisation = 66342.58
 fluence_resampling = 3
 terma_mask_enable = true
-terma_mask_max_distance = 8                # cm
+terma_mask_max_distance = 8  # cm
 terma_mask_terma_threshold = 0.005
 active_dose_interp_enable = false
 active_dose_interp_skip = 4
 active_dose_interp_terma_threshold = 0.002
 active_dose_interp_dose_threshold = 0.05
-arc_sector_size = 10.0                     # degrees
+arc_sector_size = 10.0  # degrees
 
 [energy_spectrum]
-energies = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0] # MeV
-weights = [
-    0.19955399,
-    0.15553174,
-    0.10043559,
-    0.06463236,
-    0.04261473,
-    0.02889011,
-    0.02010384,
-    0.01432034,
-    0.01041332,
-    0.00771144,
-    0.00580349,
-    0.00443081,
-]
-# weights = [
-#     0.30697153,
-#     0.07478134,
-#     0.06379992,
-#     0.07548931,
-#     0.0678365,
-#     0.0375327,
-#     0.02532493,
-#     0.02908535,
-#     0.0,
-#     0.00514878,
-#     0.0,
-#     0.00353787,
-# ] # fmt: skip
-
+energies = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0]  # MeV
+weights = [0.19955399, 0.15553174, 0.10043559, 0.06463236, 0.04261473, 0.02889011, 0.02010384, 0.01432034, 0.01041332, 0.00771144, 0.00580349, 0.00443081]
 
 [off_axis_softening]
 oads = [0.0, 40.0]   # cm
 factors = [0.0, 0.0]
 
 [beam_profile_correction]
-oads = [
-    0.0,
-    1.0,
-    2.0,
-    3.0,
-    5.0,
-    7.0,
-    9.0,
-    11.0,
-    12.0,
-    15.0,
-    17.0,
-    19.0,
-    21.0,
-    23.0,
-    24.0,
-    24.5,
-    25.0,
-    25.5,
-    26.0,
-    30.0,
-]
-factors = [
-    1.000,
-    0.998,
-    0.981,
-    0.960,
-    0.901,
-    0.837,
-    0.780,
-    0.727,
-    0.696,
-    0.625,
-    0.578,
-    0.537,
-    0.510,
-    0.475,
-    0.450,
-    0.440,
-    0.200,
-    0.100,
-    0.000,
-    0.000,
-]
+oads = [0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 9.0, 11.0, 12.0, 15.0, 17.0, 19.0, 21.0, 23.0, 24.0, 24.5, 25.0, 25.5, 26.0, 30.0]  # cm
+factors = [1.000, 0.998, 0.981, 0.960, 0.901, 0.837, 0.780, 0.727, 0.696, 0.625, 0.578, 0.537, 0.510, 0.475, 0.450, 0.440, 0.200, 0.100, 0.000, 0.000]
 
 [output_factor_correction]
-field_sizes = [3.0, 4.0, 6.0, 8.0, 10.0, 20.0, 30.0, 40.0] # cm
-factors = [
-    0.97319069,
-    0.976617807,
-    0.986234246,
-    0.99550507,
-    0.999999937,
-    1.016856347,
-    1.024022273,
-    1.027471555,
-]
+field_sizes = [3.0, 4.0, 6.0, 8.0, 10.0, 20.0, 30.0, 40.0]  # cm
+factors = [0.97319069, 0.976617807, 0.986234246, 0.99550507, 0.999999937, 1.016856347, 1.024022273, 1.027471555]
