@@ -36,9 +36,9 @@ def calculate(
         the fluence kernel.
     exam : Exam
         Exam object used to sample densities onto the target grid.
-    jaw_x_positions, jaw_y_positions : Sequence[float]
-        Two-element iterables giving jaw positions in the X and Y axes
-        (used when computing output factor correction).
+    jaw_x_positions, jaw_y_positions : ndarray
+        Jaw positions in the X and Y axes (used when computing output factor
+        correction).
     settings : Mapping[str, Any]
         Calculation settings and lookup tables used by kernels (energies,
         samples, off-axis softening tables, normalisation, etc.).

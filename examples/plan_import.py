@@ -29,9 +29,10 @@ grid = Grid(
 for beam in plan.beams:
     beam.dose = Grid(corner=grid.corner, resolution=grid.resolution, num_voxels=grid.num_voxels)
     if beam.type == "STATIC":
-        # This value means that all control point attributes in consecutive pairs of control points are identical
-        # while only the cumulative meterset weight changes. This is typical for 3DCRT and step-and-shoot IMRT plans.
-        # Step-and-shoot IMRT is not supported yet, so we will just assume a STATIC beam means 3DCRT for now.
+        # This value means that all control point attributes in consecutive pairs of control points
+        # are identical while only the cumulative meterset weight changes. This is typical for 3DCRT
+        # and step-and-shoot IMRT plans. Step-and-shoot IMRT is not supported yet, so we will just
+        # assume a STATIC beam means 3DCRT for now.
 
         # All the information we need is in the first control point.
         cp = beam.control_points[0]
@@ -60,27 +61,30 @@ for beam in plan.beams:
         beam.dose.values *= beam.mu  # type: ignore
 
     elif beam.type == "DYNAMIC":
-        # This value means that multiple control point attributes change from one control point to the next.
-        # This is typical of VMAT plans and sliding-window IMRT plans. IMRT is not supported yet, so we will
-        # assume this is a VMAT beam for now.
+        # This value means that multiple control point attributes change from one control point to
+        # the next. This is typical of VMAT beams and sliding-window IMRT beams. IMRT is not
+        # supported yet, so we will assume this is a VMAT beam for now.
         #
-        # We will need to implement special handling for VMAT plans, as they typically contain many control points
-        # with small angular increments. Performing a calculation at each control point would be prohibitive, e.g., an arc with
-        # 180 control points (2 degree spacing) would take 180 times longer to calculate than a 3DCRT beam at a single angle.
-        # So, we want to sample the arc down to a manageable number of angles while still capturing the plan's essence.
-        # We do this by grouping the control points into arc sectors of a user-specified size (e.g., 10 degrees),
-        # and combining the control points within each sector into a single representative control point by calculating
-        # an average fluence map weighted by the relative meterset weight of each control point in the sector. We take the
-        # gantry angle at the middle of the sector as the representative angle.
+        # We will need to implement special handling for VMAT beams, as they typically contain many
+        # control points with small angular increments. Performing a calculation at each control
+        # point would be prohibitive, e.g., an arc with 180 control points (2 degree spacing) would
+        # take 180 times longer to calculate than a 3DCRT beam at a single angle. So, we want to
+        # sample the arc down to a manageable number of angles while still capturing the plan's
+        # essence. We do this by grouping the control points into arc sectors of a user-specified
+        # size (e.g., 10 degrees) and combining the control points within each sector into a single
+        # representative control point by calculating an average fluence map weighted by the
+        # relative meterset weight of each control point in the sector. We take the gantry angle at
+        # the middle of the sector as the representative angle.
 
         # Let's start by inspecting the control points and grabbing the gantry angle at each point.
-        # To handle the discontinuity at gantry 0/360, we map the gantry angles to a 0-360 degree range
-        # starting from 6 o'clock and going clockwise.
+        # To handle the discontinuity at gantry 0/360, we map the gantry angles to a 0-360 degree
+        # range starting from 6 o'clock and going clockwise.
         control_points = beam.control_points
         gantry_angles = [((float(cp.gantry) + 180.0) % 360.0) for cp in control_points]
 
         # Now we want to iterate through the gantry angles and group the control points into sectors.
-        # We start from the first angle and keep adding control points until we exceed the sector angle limit.
+        # We start from the first angle and keep adding control points until we exceed the sector
+        # angle limit.
         sectors = []
         sector_size = settings["calculation"]["arc_sector_size"]  # degrees
         current_sector_start_angle = gantry_angles[0]
@@ -101,12 +105,14 @@ for beam in plan.beams:
                 # Add to current sector
                 current_sector_cps.append(control_points[i])
 
-        # Now that we have the control points grouped into sectors, we combine the control points in each sector
-        # to get a representative control point for that sector. We then calculate the dose from this sector.
+        # Now that we have the control points grouped into sectors, we combine the control points in
+        # each sector to get a representative control point for that sector. We then calculate the
+        # dose from this sector.
         for i, sector in enumerate(sectors):
             # Calculate the total meterset weight for the sector
             sector_meterset_weight = sector[-1].cum_meterset_weight - sector[0].cum_meterset_weight
-            # Combine the control points in the sector into a single Block weighted by relative meterset weight
+            # Combine the control points in the sector into a single Block weighted by relative
+            # meterset weight
             sector_block = Block(settings=settings)
             for cp in sector:
                 cp_block = Block(settings=settings, control_point=cp)
@@ -114,16 +120,16 @@ for beam in plan.beams:
                 sector_block.values += cp_block.values * rel_weight
             fluence_map_pri, fluence_map_sec = sector_block.get_fluence_maps()
 
-            # Calculate the representative gantry angle for the sector (middle of start and end angles)
+            # Calculate representative gantry angle for the sector (middle of start and end angles)
             sector_start_angle = (sector[0].gantry + 180.0) % 360.0
             sector_end_angle = (sector[-1].gantry + 180.0) % 360.0
             sector_mid_angle = (sector_start_angle + sector_end_angle) / 2
-            sector_mid_angle = (sector_mid_angle + 180.0) % 360.0
+            sector_mid_angle = (sector_mid_angle + 180.0) % 360.0  # Map back to -180 to 180 range
             source = Source()
             source.gantry = np.float32(sector_mid_angle)
             source.collimator = np.float32(sector[0].collimator)
 
-            # Calculate the average jaw positions for the sector for the purpose of output factor correction
+            # Calculate the average jaw positions for the sector for output factor correction
             x1 = np.mean([cp.jaw_x_positions[0] for cp in sector], dtype=np.float32)
             y1 = np.mean([cp.jaw_y_positions[0] for cp in sector], dtype=np.float32)
             x2 = np.mean([cp.jaw_x_positions[1] for cp in sector], dtype=np.float32)
