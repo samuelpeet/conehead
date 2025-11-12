@@ -1,8 +1,7 @@
 from typing import Tuple
 import numpy as np
 import numpy.typing as npt
-from conehead.plan import Beam, ControlPoint
-from pydicom.dataset import Dataset as PydicomDataset
+from conehead.plan import ControlPoint
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import RegularGridInterpolator, make_interp_spline
 
