@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-
+import os
 import numpy as np
 import numpy.typing as npt
 import pydicom
@@ -22,12 +22,15 @@ class ControlPoint:
     """
 
     index: int
+    mlc_boundaries: npt.NDArray[np.float32]
     mlc_positions: npt.NDArray[np.float32]
     jaw_x_positions: npt.NDArray[np.float32]
     jaw_y_positions: npt.NDArray[np.float32]
     gantry: np.float32
     collimator: np.float32
     couch: np.float32
+    cum_meterset_weight: np.float32
+    diff_meterset_weight: np.float32
     nominal_beam_energy: Optional[np.float32] = None
     isocenter_position: Optional[npt.NDArray[np.float32]] = None
 
@@ -52,7 +55,7 @@ class Beam:
 class Plan:
     """Simple loader for DICOM RT Plan files.
 
-    Pass a file path to an RT Plan DICOM file (or a pydicom Dataset) and the
+    Pass a path to directory holding an RT Plan DICOM file (or a pydicom Dataset) and the
     object will parse and expose a small set of commonly-used attributes:
 
     - ``plan_label``: RT Plan label / name
@@ -63,7 +66,7 @@ class Plan:
     incomplete or vendor-specific RT Plan files.
     """
 
-    path: Optional[str] = None
+    dicom_dir: Optional[str] = None
     dataset: Optional[PydicomDataset] = None
     plan_label: Optional[str] = None
     plan_date: Optional[str] = None
@@ -76,11 +79,37 @@ class Plan:
     patient_sex: Optional[str] = None
     delivery_method: Optional[str] = None
     beams: List[Beam] = field(default_factory=list)
+    dose: Optional[Grid] = None
     plan_instance_uid: Optional[str] = None
 
     def __post_init__(self) -> None:
-        if self.path and self.dataset is None:
-            ds = pydicom.dcmread(self.path)
+        if self.dicom_dir and self.dataset is None:
+            dicom_files = []
+            for f in os.listdir(self.dicom_dir):
+                if not f.endswith(".dcm"):
+                    continue
+                path = os.path.join(self.dicom_dir, f)
+                try:
+                    ds = pydicom.dcmread(path)
+                except Exception:
+                    # Skip files that fail to parse
+                    print(f"Failed to read DICOM file: {path}")
+                    continue
+                dicom_files.append(ds)
+            # Remove any non-RTPLAN files
+            dicom_files = [
+                f
+                for f in dicom_files
+                if getattr(f, "SOPClassUID", None) is not None
+                and f.SOPClassUID.name == "RT Plan Storage"
+            ]
+            if len(dicom_files) == 0:
+                # No RT Plan file found
+                return None
+            if len(dicom_files) > 1:
+                raise ValueError(f"Multiple RT Plan DICOM files found in folder: {self.dicom_dir}")
+
+            ds = pydicom.dcmread(dicom_files[0])
             self.dataset = ds
 
         if self.dataset is not None:
@@ -167,7 +196,7 @@ class Plan:
             cps = getattr(b, "ControlPointSequence", None) or []
             for i, cp in enumerate(cps):
                 gantry = getattr(cp, "GantryAngle", None)
-                coll = getattr(cp, "BeamLimitingDeviceAngle", None) or getattr(
+                collimator = getattr(cp, "BeamLimitingDeviceAngle", None) or getattr(
                     cp, "CollimatorAngle", None
                 )
                 couch = getattr(cp, "PatientSupportAngle", None)
@@ -176,6 +205,13 @@ class Plan:
                 energy = getattr(cp, "NominalBeamEnergy", None) or getattr(
                     b, "NominalBeamEnergy", None
                 )
+                cum_meterset_weight = np.float32(getattr(cp, "CumulativeMetersetWeight", 0.0))
+                if i == 0:
+                    diff_meterset_weight = cum_meterset_weight
+                else:
+                    diff_meterset_weight = (
+                        cum_meterset_weight - control_points[i - 1].cum_meterset_weight
+                    )
 
                 # Jaw positions and MLC positions
                 bld_seq = getattr(cp, "BeamLimitingDevicePositionSequence", None)
@@ -223,14 +259,29 @@ class Plan:
                 if mlc_positions is not None:
                     mlc_positions = np.array(mlc_positions, dtype=np.float32) * 0.1
 
+                # Some attributes are only carried in the first control point. Propagate them.
+                if gantry is None:
+                    gantry = control_points[0].gantry
+                if collimator is None:
+                    collimator = control_points[0].collimator
+                if couch is None:
+                    couch = control_points[0].couch
+                if energy is None:
+                    energy = control_points[0].nominal_beam_energy
+                if isocenter_position is None:
+                    isocenter_position = control_points[0].isocenter_position
+
                 control = ControlPoint(
                     index=i,
                     gantry=np.float32(gantry),
-                    collimator=np.float32(coll),
+                    collimator=np.float32(collimator),
                     couch=np.float32(couch),
+                    cum_meterset_weight=cum_meterset_weight,
+                    diff_meterset_weight=diff_meterset_weight,
                     nominal_beam_energy=energy,
                     jaw_x_positions=jaw_x_positions,
                     jaw_y_positions=jaw_y_positions,
+                    mlc_boundaries=mlc_boundaries,
                     mlc_positions=mlc_positions,  # type: ignore
                     isocenter_position=isocenter_position,
                 )
