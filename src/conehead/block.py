@@ -81,10 +81,8 @@ class Block:
     def __init__(
         self,
         settings: dict,
-        rotation: npt.NDArray[np.float32] = np.array([0, 0, 0], dtype=np.float32),
         control_point: ControlPoint | None = None,
     ):
-        self.rotation = rotation
         self.settings = settings
         if control_point and settings:
             if settings["collimators"]["mlc"]["mlc_model"] != "Millennium120":
@@ -128,7 +126,7 @@ class Block:
 
     def _set_from_control_point(self, control_point: ControlPoint, settings: dict):
         # Convert from cm to tenths of a mm
-        mlc_boundaries = control_point.mlc_positions * 100
+        mlc_boundaries = control_point.mlc_boundaries * 100
         mlc_ends = np.floor(control_point.mlc_positions * 100)
         jaw_x_positions = np.floor(control_point.jaw_x_positions * 100)
         jaw_y_positions = np.floor(control_point.jaw_y_positions * 100)
