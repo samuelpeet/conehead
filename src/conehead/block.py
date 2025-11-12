@@ -205,6 +205,10 @@ class Block:
         self.values[: int(2000 + jaw_y_positions[0]), :] *= y_trans
         self.values[int(2000 + jaw_y_positions[1]) :, :] *= y_trans
 
+        # Record wedge information
+        self.wedge_angle = control_point.wedge_angle
+        self.wedge_direction = control_point.wedge_direction
+
     def get_fluence_maps(self) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
         # Extract source parameters from settings
         sources = self.settings.get("sources", None)
@@ -278,5 +282,27 @@ class Block:
         # Calculate final fluence maps
         fluence_map_pri = pri_s * pri_fluence * bpc
         fluence_map_sec = sec_s * sec_fluence
+
+        # Handle wedge modulation if present.
+        if self.wedge_angle is not None:
+            wedges = self.settings.get("wedges", None)
+            if wedges is None:
+                raise ValueError("Block settings do not contain 'wedges' information.")
+            a = wedges.get("coefficients", [])[0]
+            b = wedges.get("coefficients", [])[1]
+            c = wedges.get("coefficients", [])[2]
+            d = wedges.get("coefficients", [])[3]
+            theta = self.wedge_angle * np.pi / 180.0  # Convert to radians
+            fluence_scaling = a - b * np.tan(theta) * (
+                1 - c * (y + 0.6) - np.exp(d * (y + 0.6))
+            )  # Yu et al Med Phys 2002 Eq. 1
+            fluence_scaling_2d = np.tile(
+                fluence_scaling[:, np.newaxis], (1, 560)
+            )  # Make into 2D array of repeating columns
+            # If the wedge direction is 180 degrees, flip the fluence scaling array up-down
+            if self.wedge_direction == 180.0:
+                fluence_scaling_2d = np.flipud(fluence_scaling_2d)
+            # Now apply the fluence scaling to the primary fluence map
+            fluence_map_pri *= fluence_scaling_2d
 
         return (fluence_map_pri.astype(np.float32), fluence_map_sec.astype(np.float32))

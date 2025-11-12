@@ -31,6 +31,8 @@ class ControlPoint:
     couch: np.float32
     cum_meterset_weight: np.float32
     diff_meterset_weight: np.float32
+    wedge_angle: Optional[np.float32] = None
+    wedge_direction: Optional[np.float32] = None
     nominal_beam_energy: Optional[np.float32] = None
     isocenter_position: Optional[npt.NDArray[np.float32]] = None
 
@@ -241,6 +243,25 @@ class Plan:
                                 "Unknown RTBeamLimitingDeviceType in BeamLimitingDevicePositionSequence"
                             )
 
+                # Handle wedge information if present
+                if cp.NumberOfWedges > 0:
+                    wedge_seq = getattr(cp, "WedgeSequence", None)
+                    wedge_type = getattr(wedge_seq, "WedgeType", None)
+                    if wedge_type not in [None, "DYNAMIC"]:
+                        raise ValueError(
+                            f"Unsupported WedgeType {wedge_type} found in WedgeSequence"
+                        )
+                    wedge_angle = getattr(wedge_seq, "WedgeAngle", None)
+                    if wedge_angle not in [None, 10, 15, 20, 25, 30, 45, 60]:
+                        raise ValueError(
+                            f"Unsupported WedgeAngle {wedge_angle} found in WedgeSequence"
+                        )
+                    wedge_direction = getattr(wedge_seq, "WedgeDirection", None)
+                    if wedge_direction not in [None, 0, 180]:
+                        raise ValueError(
+                            f"Unsupported WedgeDirection {wedge_direction} found in WedgeSequence"
+                        )
+
                 isocenter_position = getattr(cp, "IsocenterPosition", None)
 
                 # Unit conversion from mm to cm
@@ -270,6 +291,10 @@ class Plan:
                     energy = control_points[0].nominal_beam_energy
                 if isocenter_position is None:
                     isocenter_position = control_points[0].isocenter_position
+                if wedge_angle is None:
+                    wedge_angle = control_points[0].wedge_angle
+                if wedge_direction is None:
+                    wedge_direction = control_points[0].wedge_direction
 
                 control = ControlPoint(
                     index=i,
@@ -278,6 +303,8 @@ class Plan:
                     couch=np.float32(couch),
                     cum_meterset_weight=cum_meterset_weight,
                     diff_meterset_weight=diff_meterset_weight,
+                    wedge_angle=wedge_angle,
+                    wedge_direction=wedge_direction,
                     nominal_beam_energy=energy,
                     jaw_x_positions=jaw_x_positions,
                     jaw_y_positions=jaw_y_positions,

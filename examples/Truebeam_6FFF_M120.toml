@@ -42,6 +42,11 @@ active_dose_interp_terma_threshold = 0.002
 active_dose_interp_dose_threshold = 0.05
 arc_sector_size = 10.0  # degrees
 
+[wedges]
+angles = [10, 15, 20, 25, 30, 45, 60]  # degrees
+directions = [0, 180]  # degrees
+coefficients = [1.14527, 0.75039, -0.0029180, 0.086611]  # Yu et al Med Phys 2002
+
 [energy_spectrum]
 energies = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0]  # MeV
 weights = [0.19955399, 0.15553174, 0.10043559, 0.06463236, 0.04261473, 0.02889011, 0.02010384, 0.01432034, 0.01041332, 0.00771144, 0.00580349, 0.00443081]
