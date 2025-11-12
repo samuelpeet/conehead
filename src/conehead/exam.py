@@ -38,7 +38,7 @@ class Exam:
             units, e.g. g/cc). The LUT is used with ``numpy.interp`` to map
             CT values to densities. This parameter is optional unless
             ``dicom_folder`` is provided (see below).
-        dicom_folder : str or None, optional
+        dicom_dir : str or None, optional
             Path to a folder containing a DICOM CT series. If provided and
             ``densities`` is ``None``, the series will be read and converted
             to a :class:`Grid` stored at ``self.densities``. When a
@@ -76,7 +76,7 @@ class Exam:
     def __init__(
         self,
         hu_lut_path: str | None = None,
-        dicom_folder: str | None = None,
+        dicom_dir: str | None = None,
         densities: Grid | None = None,
     ):
         """Create an Exam.
@@ -110,12 +110,12 @@ class Exam:
                 raise TypeError("densities must be an instance of conehead.grid.Grid")
             self.densities = densities
         # Otherwise load from DICOM if requested
-        elif dicom_folder is not None:
+        elif dicom_dir is not None:
             # DICOM loading requires an HU->density LUT
             if self.hu_lut is None:
-                raise ValueError("hu_lut_path is required when dicom_folder is provided")
-            self._load_dicom_series(dicom_folder)
-            self._load_structure_set(dicom_folder)
+                raise ValueError("hu_lut_path is required when dicom_dir is provided")
+            self._load_dicom_series(dicom_dir)
+            self._load_structure_set(dicom_dir)
             self._mask_densities_by_structures()
 
     def _load_hu_lut(self, hu_lut_path: str) -> dict:
@@ -290,7 +290,7 @@ class Exam:
                 print(f"Failed to read DICOM file: {path}")
                 continue
             dicom_files.append(ds)
-        # Remove any non-CT images
+        # Remove any non-RT STRUCT images
         dicom_files = [
             f
             for f in dicom_files
