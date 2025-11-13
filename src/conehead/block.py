@@ -425,7 +425,9 @@ class Block:
             p = wedges.get("coefficients", [])
             tan_theta = np.tan(self.wedge_angle * np.pi / 180.0)
             # Calculate fluence scaling along the wedge direction
-            fluence_scaling = p[0] - p[1] * tan_theta * (1 - (p[2] * y) - np.exp(p[3] * y))
+            fluence_scaling = p[0] - p[1] * tan_theta * (
+                1 - (p[2] * (y + 0.6)) - np.exp(p[3] * (y + 0.6))
+            )
             fluence_scaling_2d = np.tile(
                 fluence_scaling, (560, 1)
             )  # Make into 2D array of repeating rows
