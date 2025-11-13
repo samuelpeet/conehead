@@ -1,15 +1,3 @@
-from __future__ import annotations
-
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-import os
-import numpy as np
-import numpy.typing as npt
-import pydicom
-from pydicom.dataset import Dataset as PydicomDataset
-
-from conehead.grid import Grid
-
 """RT Plan parsing and small in-memory plan model.
 
 This module provides a lightweight in-memory representation of RT
@@ -29,6 +17,16 @@ DICOM native millimetre units and stored as ``np.float32`` arrays. The
 reason for this internal choice is that many downstream calculations in
 the project operate in cm.
 """
+
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+import os
+import numpy as np
+import numpy.typing as npt
+import pydicom
+from pydicom.dataset import Dataset as PydicomDataset
+from conehead.grid import Grid
 
 
 @dataclass

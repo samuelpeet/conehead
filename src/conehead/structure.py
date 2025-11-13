@@ -1,13 +1,3 @@
-from __future__ import annotations
-
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
-
-import numpy as np
-from pydicom.dataset import Dataset as PydicomDataset
-import cv2
-from conehead.grid import Grid
-
 """RT Structure Set utilities.
 
 This module provides small helpers to parse DICOM RT Structure Set
@@ -24,6 +14,14 @@ Notes
     ``fillPoly`` on each axial contour and therefore requires ``opencv-python``
     to be available in the runtime environment.
 """
+
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+import numpy as np
+from pydicom.dataset import Dataset as PydicomDataset
+import cv2
+from conehead.grid import Grid
 
 
 @dataclass

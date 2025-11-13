@@ -1,9 +1,3 @@
-from dataclasses import dataclass, field
-from typing import Optional, Tuple
-import numpy as np
-import numpy.typing as npt
-
-
 """Grid utilities used by dose/terma/mask-like volumes.
 
 This module provides a lightweight `Grid` container that stores the
@@ -19,6 +13,11 @@ Notes
 - The voxel-centre location for voxel index ``(ix, iy, iz)`` is
   ``corner + (ix+0.5, iy+0.5, iz+0.5) * resolution`` when sampling.
 """
+
+from dataclasses import dataclass, field
+from typing import Optional, Tuple
+import numpy as np
+import numpy.typing as npt
 
 
 @dataclass(slots=True)

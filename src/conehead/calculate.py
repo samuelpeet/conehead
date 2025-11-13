@@ -1,12 +1,10 @@
 import numpy as np
 import numpy.typing as npt
-
 from conehead.kernel import Kernel
 from conehead.nist import mu_water
 from conehead.grid import Grid
 from conehead.exam import Exam
 from conehead.source import Source
-
 import conehead_gpu as gpu
 
 

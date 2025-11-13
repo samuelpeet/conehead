@@ -1,13 +1,3 @@
-import numpy as np
-import pydicom
-import os
-import toml
-import matplotlib.pyplot as plt
-from scipy.interpolate import RegularGridInterpolator
-from conehead.grid import Grid
-from conehead.structure import StructureSet
-
-
 """Utilities for loading CT exams and converting HU -> density.
 
 This module provides the :class:`Exam` helper which can load a DICOM
@@ -18,6 +8,15 @@ All spatial coordinates and resolutions used by the class are stored in
 centimetres (cm); incoming DICOM spacing/positions (typically in mm)
 are converted accordingly.
 """
+
+import numpy as np
+import pydicom
+import os
+import toml
+import matplotlib.pyplot as plt
+from scipy.interpolate import RegularGridInterpolator
+from conehead.grid import Grid
+from conehead.structure import StructureSet
 
 
 class Exam:
