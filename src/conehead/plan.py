@@ -10,15 +10,43 @@ from pydicom.dataset import Dataset as PydicomDataset
 
 from conehead.grid import Grid
 
+"""RT Plan parsing and small in-memory plan model.
+
+This module provides a lightweight in-memory representation of RT
+Plan (RTPLAN) datasets. It focuses on extracting the clinically
+important numeric parameters required by the dose engine: beam and
+control point geometry (gantry, collimator, couch), jaw and MLC
+positions, meter-set weights and optional wedge metadata.
+
+The classes intentionally keep a compact footprint (primitive numpy
+arrays and dataclasses) and retain the original pydicom Dataset for
+advanced inspection when required (not all vendor tags are parsed).
+
+Units
+-----
+Where applicable values are converted to centimetres (cm) from the
+DICOM native millimetre units and stored as ``np.float32`` arrays. The
+reason for this internal choice is that many downstream calculations in
+the project operate in cm.
+"""
+
 
 @dataclass
 class ControlPoint:
     """Compact representation of a single control point in an RT Plan.
 
-    Many RT Plan datasets contain vendor-specific and optional tags. This
-    class captures the most commonly useful numeric parameters and keeps
-    the original pydicom Dataset available for advanced inspection via
-    the ``raw`` attribute.
+    This dataclass stores the per-control-point geometry needed to build
+    block/MLC models and to drive dose/fluence calculations. Typical
+    fields are jaw/MLC positions, gantry/collimator angles and
+    cumulative/differential meter-set weights.
+
+    Notes
+    -----
+    - Positions parsed from DICOM are converted from millimetres to
+        centimetres before storage (multiply mm values by 0.1).
+    - Some RTPLANs provide only a subset of fields in non-first
+        control points; the parser attempts to propagate missing values
+        from the first control point where sensible.
     """
 
     index: int
@@ -39,7 +67,12 @@ class ControlPoint:
 
 @dataclass
 class Beam:
-    """Summary of a single beam within an RT Plan."""
+    """Summary of a single beam within an RT Plan.
+
+    The Beam object aggregates control points and stores lightweight
+    planning metadata. The optional ``dose`` field can be populated by
+    dose calculation routines with a :class:`Grid` instance.
+    """
 
     number: int
     name: str
@@ -57,15 +90,36 @@ class Beam:
 class Plan:
     """Simple loader for DICOM RT Plan files.
 
-    Pass a path to directory holding an RT Plan DICOM file (or a pydicom Dataset) and the
-    object will parse and expose a small set of commonly-used attributes:
+    The Plan class can be constructed either from a directory containing
+    an RT Plan DICOM file or by passing a pre-loaded pydicom
+    :class:`pydicom.dataset.Dataset` object. It extracts a small set of
+    commonly-used attributes and builds :class:`Beam` and
+    :class:`ControlPoint` objects for downstream processing.
 
-    - ``plan_label``: RT Plan label / name
-    - ``patient_name``, ``patient_id``, ``patient_birth_date``, ``patient_sex``
-    - ``beams``: list of :class:`Beam` objects (each contains ControlPoints)
+    Parameters
+    ----------
+    dicom_dir : str, optional
+        Path to a directory containing a single RT Plan DICOM file. If
+        provided, the constructor will search for ``*.dcm`` files and
+        attempt to locate the RT Plan SOP Class.
+    dataset : pydicom.dataset.Dataset, optional
+        If supplied, parsing proceeds directly from this in-memory
+        dataset and ``dicom_dir`` is ignored.
 
-    The implementation uses safe getattr() lookups so it will tolerate
-    incomplete or vendor-specific RT Plan files.
+    Attributes
+    ----------
+    beams : list of Beam
+        Parsed beams in the plan.
+    plan_label : str
+        Human readable plan label (if present in the dataset).
+
+    Notes
+    -----
+    The parser is intentionally tolerant: it uses ``getattr`` to read
+    optional tags and applies reasonable defaults for missing
+    jaw/MLC/position values. However, certain missing items (for
+    example essential beam identifiers) will trigger a ``ValueError`` so
+    that the caller is aware of malformed datasets.
     """
 
     dicom_dir: Optional[str] = None
@@ -114,11 +168,22 @@ class Plan:
             self.dataset = dicom_files[0]
 
         if self.dataset is not None:
+            # Parse the RTPLAN dataset into the lightweight internal
+            # representation used by the rest of the library.
             self._parse_dataset(self.dataset)
 
     def _parse_dataset(self, ds: PydicomDataset) -> None:
-        # All numerical lists/values converted to np.float32 ndarrays.
-        # Also converted to cm from DICOM mm.
+        """Parse a pydicom Dataset containing an RT Plan.
+
+        The method extracts patient-level metadata, iterates over beam
+        sequence items and builds :class:`Beam` and :class:`ControlPoint`
+        objects. Numeric arrays are converted to ``np.float32`` and
+        where appropriate unit-converted to centimetres.
+        """
+
+        # All numerical lists/values are converted to np.float32 ndarrays
+        # and converted from DICOM mm to internal cm units where
+        # applicable.
 
         # Basic patient / plan metadata
         self.plan_label = getattr(ds, "RTPlanLabel", None) or getattr(ds, "RTPlanName", None)
@@ -333,7 +398,11 @@ class Plan:
             self.beams.append(beam)
 
     def summary(self) -> Dict[str, Any]:
-        """Return a compact summary dictionary of the loaded plan."""
+        """Return a compact summary dictionary of the loaded plan.
+
+        The returned dictionary is intentionally small and intended for
+        quick logging, display or lightweight unit tests.
+        """
         return {
             "plan_label": self.plan_label,
             "patient_name": self.patient_name,

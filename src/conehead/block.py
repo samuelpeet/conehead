@@ -1,3 +1,21 @@
+"""Block plane and fluence map utilities.
+
+This module defines classes and functions to model the treatment head
+collimators (jaws and a Varian Millennium MLC) projected into the
+block/leaf plane and to generate low-resolution fluence maps from the
+high-resolution block plane values.
+
+Two main classes are provided:
+
+- VarianLeaf: Encapsulates the geometric and transmission properties of a
+    single MLC leaf (tongue-and-groove, tip profile and screw recess).
+- Block: Represents the entire block/leaf plane for a control point. It
+    can be constructed from a `ControlPoint` (RTPLAN-derived) and can
+    produce primary and secondary fluence maps after convolution and
+    beam-profile corrections.
+
+"""
+
 from typing import Tuple
 import numpy as np
 import numpy.typing as npt
@@ -7,6 +25,41 @@ from scipy.interpolate import RegularGridInterpolator, make_interp_spline
 
 
 class VarianLeaf:
+    """Model a single Varian Millennium MLC leaf.
+
+    The object converts configuration values (from the `settings` dict)
+    into internal units (tenths of a millimetre) and exposes a
+    transmission profile used when slicing leaves into the global block
+    plane.
+
+    Parameters
+    ----------
+    min_bound : float
+        Minimum coordinate of the MLC boundary region (in same units as
+        values in `mlc_boundaries` — later converted to tenths of mm).
+    min_y, max_y : float
+        y-range (row indices) spanned by this leaf within the MLC
+        boundary grid.
+    end : float
+        Leaf end position (in same units as `mlc_positions`) used to set
+        the per-leaf screw/tip offsets.
+    bank : {'A', 'B'}
+        Leaf bank identifier. Bank A is conventionally the left bank,
+        B the right; behaviour (indexing and flipping) depends on this
+        flag.
+    settings : dict
+        Global machine settings dictionary. Expects an entry
+        ``settings['collimators']['mlc']`` with the MLC geometry and
+        transmission values.
+
+    Attributes
+    ----------
+    area : ndarray
+        2D transmission map for this leaf including tongue-and-groove
+        modifications (shape depends on the leaf width and configured
+        sampling along the leaf length).
+    """
+
     def __init__(
         self,
         min_bound: np.float32,
@@ -50,10 +103,36 @@ class VarianLeaf:
             assert False, "bank must be 'A' or 'B'"
 
     def _leaf_transmission(self, width: int, height: int) -> npt.NDArray[np.float32]:
+        """Compute the 2D effective leaf thickness and convert to transmission.
+
+        The returned array represents the effective radiological path
+        length through the leaf material for each sampled point along
+        the leaf and is converted to transmission using an effective
+        linear attenuation coefficient derived from the measured bulk
+        transmission value.
+
+        Parameters
+        ----------
+        width : int
+            Number of rows (in pixels) spanned by the leaf including the
+            tongue-and-groove padding.
+        height : int
+            Number of sampling points along the leaf length direction.
+
+        Returns
+        -------
+        transmission : ndarray
+            2D array giving transmission values in the range (0, 1].
+            dtype is float32.
+        """
+
         x = np.arange(0, height, 1).astype(np.float32)
         z = np.zeros_like(x).astype(np.float32)
 
-        # Calculate leaf thickness profile
+        # Calculate leaf thickness profile along the leaf length. The
+        # profile uses a rounded tip model for the first zone, a constant
+        # thickness through the main leaf body, and a reduced thickness
+        # in the screw recess region.
         for i in range(len(x)):
             if x[i] <= self.x_tip_start:
                 z[i] = 2.0 * np.sqrt(self.x_r**2 - (self.x_r - x[i]) ** 2)
@@ -62,7 +141,8 @@ class VarianLeaf:
             else:
                 z[i] = self.z_leaf - self.z_screw
 
-        # Tongue-and-groove effect
+        # Apply tongue-and-groove partial transmission at the top and
+        # bottom rows of the leaf.
         tg_pix = int(width + 2 * self.y_tg)
         area = np.tile(z, (tg_pix, 1))
         tg_num = int(self.y_tg * 2)
@@ -70,13 +150,36 @@ class VarianLeaf:
             area[i, :] *= 0.5
             area[-(1 + i), :] *= 0.5
 
-        # Convert to transmission
+        # Convert thickness (area) to transmission using an effective
+        # attenuation coefficient. T_meas is the measured bulk
+        # transmission for the MLC material and z_leaf is its nominal
+        # thickness.
         mu_eff = -np.log(self.T_meas) / self.z_leaf
         transmission = np.exp(-mu_eff * area)
         return transmission
 
 
 class Block:
+    """Represent the collimation/block plane for a control point.
+
+    The Block holds a high-resolution 2D array (`values`) that encodes
+    the per-pixel transmission due to jaws and MLC leaves projected into
+    the block/leaf plane. Instances may be constructed empty or by
+    passing a `ControlPoint` and a `settings` dict — in the latter
+    case the MLC geometry for a single control point is sliced into
+    the block plane and jaw transmission applied.
+
+    Parameters
+    ----------
+    settings : dict
+        Machine and beam configuration dictionary used when building the
+        block from a `ControlPoint` and to configure source/fluence
+        generation.
+    control_point : conehead.plan.ControlPoint, optional
+        If provided, the block plane will be initialised from the
+        control point's MLC and jaw positions.
+    """
+
     def __init__(
         self,
         settings: dict,
@@ -101,12 +204,15 @@ class Block:
             )
 
     def set_square(self, length: np.float32):
-        """Set the block to have a square opening with a given side length.
+        """Set a simple square aperture in the block plane.
+
+        This helper is mainly intended for tests and simple QA where a
+        centred square opening of a given side length is required.
 
         Parameters
         ----------
         length : float
-            Side length of square opening
+            Side length (cm) of the square opening centred on the block.
         """
         # Clear previous aperture
         self.values.fill(np.float32(0))
@@ -124,6 +230,25 @@ class Block:
         self.y2_jaw_pos = length / 2
 
     def _set_from_control_point(self, control_point: ControlPoint, settings: dict):
+        """Initialise the Block from an RTPLAN-derived control point.
+
+        The method converts positions expressed in centimetres in the
+        `ControlPoint` into the internal sampling units (tenths of a
+        millimetre) used by the MLC geometry tables. It then creates
+        VarianLeaf objects for each leaf and slices their transmission
+        maps into the high-resolution 2D `values` array. Finally jaw
+        transmissions and wedge metadata are applied.
+
+        Parameters
+        ----------
+        control_point : conehead.plan.ControlPoint
+            Parsed control point containing `mlc_boundaries`,
+            `mlc_positions` and `jaw_*` positions (all in cm).
+        settings : dict
+            Machine settings dictionary (expects MLC geometry and jack
+            jaw transmission entries).
+        """
+
         # Convert from cm to tenths of a mm
         mlc_boundaries = control_point.mlc_boundaries * 100
         mlc_ends = np.floor(control_point.mlc_positions * 100)
@@ -164,21 +289,9 @@ class Block:
         self.values = np.ones(
             (int(np.abs(mlc_boundaries[0] - mlc_boundaries[-1])), 4000), dtype=np.float32
         )
-        for i, leaf in enumerate(leaves):
+        for leaf in leaves:
             # Because of tongue-and-groove effect, we have to be careful with slicing the first
             # and last leaf in the bank, otherwise they will spill out of bounds.
-            # if leaf.r_min
-            #     x1_offset = 0
-            #     x2_offset = 0
-            #     x1 = leaf.r_min
-            #     x2 = leaf.r_max
-            #     y1 = leaf.c_min
-            #     y2 = leaf.c_max
-            #     self.values[x1:x2, y1:y2] *= np.fliplr(
-            #         leaf.area[x1_offset : (leaf.r_max - leaf.r_min - x2_offset), :]
-            #     )
-            #     continue
-
             x1_offset = 0
             x2_offset = 0
             if leaf.r_min >= 0:
@@ -210,6 +323,27 @@ class Block:
         self.wedge_orientation = control_point.wedge_orientation
 
     def get_fluence_maps(self) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
+        """Generate primary and secondary fluence maps from the block plane.
+
+        The method performs the following high-level steps:
+
+        1. Read source size and fluence scaling parameters from
+            ``self.settings``.
+        2. Interpolate the high-resolution block plane (`self.values`) to
+            a lower-resolution grid representing the fluence plane.
+        3. Convolve the interpolated block with Gaussian kernels to
+            represent finite source sizes for primary and secondary
+            source models.
+        4. Apply a radial beam-profile correction (BPC) and optional
+            wedge modulation to the primary fluence map.
+
+        Returns
+        -------
+        fluence_map_pri, fluence_map_sec : ndarray, ndarray
+            Primary and secondary fluence maps as float32 arrays with
+            the target shape (560, 560) by default.
+        """
+
         # Extract source parameters from settings
         sources = self.settings.get("sources", None)
         if sources is None:
