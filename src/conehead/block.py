@@ -207,7 +207,7 @@ class Block:
 
         # Record wedge information
         self.wedge_angle = control_point.wedge_angle
-        self.wedge_direction = control_point.wedge_direction
+        self.wedge_orientation = control_point.wedge_orientation
 
     def get_fluence_maps(self) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
         # Extract source parameters from settings
@@ -288,20 +288,16 @@ class Block:
             wedges = self.settings.get("wedges", None)
             if wedges is None:
                 raise ValueError("Block settings do not contain 'wedges' information.")
-            a = wedges.get("coefficients", [])[0]
-            b = wedges.get("coefficients", [])[1]
-            c = wedges.get("coefficients", [])[2]
-            d = wedges.get("coefficients", [])[3]
-            theta = self.wedge_angle * np.pi / 180.0  # Convert to radians
-            fluence_scaling = a - b * np.tan(theta) * (
-                1 - c * (y + 0.6) - np.exp(d * (y + 0.6))
-            )  # Yu et al Med Phys 2002 Eq. 1
+            p = wedges.get("coefficients", [])
+            tan_theta = np.tan(self.wedge_angle * np.pi / 180.0)
+            # Calculate fluence scaling along the wedge direction
+            fluence_scaling = p[0] - p[1] * tan_theta * (1 - (p[2] * y) - np.exp(p[3] * y))
             fluence_scaling_2d = np.tile(
-                fluence_scaling[:, np.newaxis], (1, 560)
-            )  # Make into 2D array of repeating columns
-            # If the wedge direction is 180 degrees, flip the fluence scaling array up-down
-            if self.wedge_direction == 180.0:
-                fluence_scaling_2d = np.flipud(fluence_scaling_2d)
+                fluence_scaling, (560, 1)
+            )  # Make into 2D array of repeating rows
+            # If the wedge orientation is 0 degrees, flip the fluence scaling array left-right
+            if self.wedge_orientation == 180:
+                fluence_scaling_2d = np.fliplr(fluence_scaling_2d)
             # Now apply the fluence scaling to the primary fluence map
             fluence_map_pri *= fluence_scaling_2d
 

@@ -32,7 +32,7 @@ class ControlPoint:
     cum_meterset_weight: np.float32
     diff_meterset_weight: np.float32
     wedge_angle: Optional[np.float32] = None
-    wedge_direction: Optional[np.float32] = None
+    wedge_orientation: Optional[np.float32] = None
     nominal_beam_energy: Optional[np.float32] = None
     isocenter_position: Optional[npt.NDArray[np.float32]] = None
 
@@ -111,8 +111,7 @@ class Plan:
             if len(dicom_files) > 1:
                 raise ValueError(f"Multiple RT Plan DICOM files found in folder: {self.dicom_dir}")
 
-            ds = pydicom.dcmread(dicom_files[0])
-            self.dataset = ds
+            self.dataset = dicom_files[0]
 
         if self.dataset is not None:
             self._parse_dataset(self.dataset)
@@ -198,9 +197,7 @@ class Plan:
             cps = getattr(b, "ControlPointSequence", None) or []
             for i, cp in enumerate(cps):
                 gantry = getattr(cp, "GantryAngle", None)
-                collimator = getattr(cp, "BeamLimitingDeviceAngle", None) or getattr(
-                    cp, "CollimatorAngle", None
-                )
+                collimator = getattr(cp, "BeamLimitingDeviceAngle", None)
                 couch = getattr(cp, "PatientSupportAngle", None)
                 if couch is not None and couch != 0:
                     raise NotImplementedError("Non-zero couch angles are not currently supported.")
@@ -244,22 +241,30 @@ class Plan:
                             )
 
                 # Handle wedge information if present
-                if cp.NumberOfWedges > 0:
-                    wedge_seq = getattr(cp, "WedgeSequence", None)
-                    wedge_type = getattr(wedge_seq, "WedgeType", None)
-                    if wedge_type not in [None, "DYNAMIC"]:
-                        raise ValueError(
-                            f"Unsupported WedgeType {wedge_type} found in WedgeSequence"
-                        )
-                    wedge_angle = getattr(wedge_seq, "WedgeAngle", None)
-                    if wedge_angle not in [None, 10, 15, 20, 25, 30, 45, 60]:
-                        raise ValueError(
-                            f"Unsupported WedgeAngle {wedge_angle} found in WedgeSequence"
-                        )
-                    wedge_direction = getattr(wedge_seq, "WedgeDirection", None)
-                    if wedge_direction not in [None, 0, 180]:
-                        raise ValueError(
-                            f"Unsupported WedgeDirection {wedge_direction} found in WedgeSequence"
+                wedge_angle = None
+                wedge_orientation = None
+                if hasattr(b, "NumberOfWedges"):
+                    if b.NumberOfWedges == 1:
+                        wedge_seq = getattr(b, "WedgeSequence")
+                        wedge_type = getattr(wedge_seq[0], "WedgeType", None)
+                        print(f"beam number {b.BeamNumber} wedge_type: {wedge_type}")
+                        if wedge_type not in ["DYNAMIC"]:
+                            raise ValueError(
+                                f"Unsupported WedgeType {wedge_type} found in WedgeSequence"
+                            )
+                        wedge_angle = getattr(wedge_seq[0], "WedgeAngle", None)
+                        if wedge_angle not in [10, 15, 20, 25, 30, 45, 60]:
+                            raise ValueError(
+                                f"Unsupported WedgeAngle {wedge_angle} found in WedgeSequence"
+                            )
+                        wedge_orientation = getattr(wedge_seq[0], "WedgeOrientation", None)
+                        if wedge_orientation not in [0, 180]:
+                            raise ValueError(
+                                f"Unsupported WedgeOrientation {wedge_orientation} found in WedgeSequence"
+                            )
+                    elif b.NumberOfWedges > 1:
+                        raise NotImplementedError(
+                            "Multiple wedges per beam are not currently supported."
                         )
 
                 isocenter_position = getattr(cp, "IsocenterPosition", None)
@@ -291,10 +296,10 @@ class Plan:
                     energy = control_points[0].nominal_beam_energy
                 if isocenter_position is None:
                     isocenter_position = control_points[0].isocenter_position
-                if wedge_angle is None:
-                    wedge_angle = control_points[0].wedge_angle
-                if wedge_direction is None:
-                    wedge_direction = control_points[0].wedge_direction
+                # if wedge_angle is None:
+                #     wedge_angle = control_points[0].wedge_angle
+                # if wedge_orientation is None:
+                #     wedge_orientation = control_points[0].wedge_orientation
 
                 control = ControlPoint(
                     index=i,
@@ -304,7 +309,7 @@ class Plan:
                     cum_meterset_weight=cum_meterset_weight,
                     diff_meterset_weight=diff_meterset_weight,
                     wedge_angle=wedge_angle,
-                    wedge_direction=wedge_direction,
+                    wedge_orientation=wedge_orientation,
                     nominal_beam_energy=energy,
                     jaw_x_positions=jaw_x_positions,
                     jaw_y_positions=jaw_y_positions,
