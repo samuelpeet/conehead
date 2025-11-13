@@ -46,6 +46,10 @@ def _make_dicom_slice(path, z, value=100):
 
     ds = FileDataset(str(path), {}, file_meta=file_meta, preamble=b"\0" * 128)
     ds.SOPClassUID = pydicom.uid.CTImageStorage
+    ds.StudyInstanceUID = generate_uid()
+    ds.StudyDate = "20240101"
+    ds.StudyTime = "120000"
+    ds.StudyID = "TESTSTUDY"
     ds.Rows = 3
     ds.Columns = 3
     ds.SamplesPerPixel = 1
@@ -79,7 +83,7 @@ def test_construct_with_dicom_and_lut(tmp_path):
     _make_dicom_slice(dicom_dir / "slice0.dcm", z=0, value=2)
     _make_dicom_slice(dicom_dir / "slice1.dcm", z=1, value=3)
 
-    ex = Exam(hu_lut_path=str(lut_path), dicom_folder=str(dicom_dir))
+    ex = Exam(hu_lut_path=str(lut_path), dicom_dir=str(dicom_dir))
     assert hasattr(ex, "densities")
     g = ex.densities
     assert isinstance(g, Grid)
@@ -96,8 +100,8 @@ def test_dicom_requires_lut(tmp_path):
     _make_dicom_slice(dicom_dir / "slice0.dcm", z=0, value=10)
 
     with pytest.raises(ValueError):
-        # hu_lut_path is required when dicom_folder is provided
-        Exam(dicom_folder=str(dicom_dir))
+        # hu_lut_path is required when dicom_dir is provided
+        Exam(dicom_dir=str(dicom_dir))
 
 
 def test_invalid_lut_raises(tmp_path):
@@ -130,7 +134,7 @@ def test_densities_take_precedence_over_dicom(tmp_path):
 
     # Provide densities explicitly; Exam should use them and not read DICOM
     g = Grid(num_voxels=[2, 2, 1], corner=[0.0, 0.0, 0.0], resolution=[1.0, 1.0, 1.0])
-    ex = Exam(hu_lut_path=str(lut_path), dicom_folder=str(dicom_dir), densities=g)
+    ex = Exam(hu_lut_path=str(lut_path), dicom_dir=str(dicom_dir), densities=g)
     assert ex.densities is g
 
 
@@ -197,7 +201,7 @@ def test_no_ct_files_found(tmp_path):
     lpath.write_text(toml.dumps(lut))
 
     with pytest.raises(ValueError):
-        Exam(hu_lut_path=str(lpath), dicom_folder=str(dicom_dir))
+        Exam(hu_lut_path=str(lpath), dicom_dir=str(dicom_dir))
 
 
 def test_missing_image_position_patient(tmp_path):
@@ -232,7 +236,7 @@ def test_missing_image_position_patient(tmp_path):
     lpath.write_text(toml.dumps(lut))
 
     with pytest.raises(ValueError):
-        Exam(hu_lut_path=str(lpath), dicom_folder=str(dicom_dir))
+        Exam(hu_lut_path=str(lpath), dicom_dir=str(dicom_dir))
 
 
 def test_missing_required_tag(tmp_path):
@@ -259,7 +263,7 @@ def test_missing_required_tag(tmp_path):
     lpath.write_text(toml.dumps(lut))
 
     with pytest.raises(ValueError):
-        Exam(hu_lut_path=str(lpath), dicom_folder=str(dicom_dir))
+        Exam(hu_lut_path=str(lpath), dicom_dir=str(dicom_dir))
 
 
 def test_missing_pixel_array(tmp_path):
@@ -294,7 +298,7 @@ def test_missing_pixel_array(tmp_path):
     lpath.write_text(toml.dumps(lut))
 
     with pytest.raises(ValueError):
-        Exam(hu_lut_path=str(lpath), dicom_folder=str(dicom_dir))
+        Exam(hu_lut_path=str(lpath), dicom_dir=str(dicom_dir))
 
 
 def test_runtime_error_when_lut_missing_in_loader():
@@ -414,7 +418,7 @@ def test_load_structures_and_masking(tmp_path):
     rt.save_as(str(dicom_dir / "rt.dcm"), enforce_file_format=True)
 
     # Now construct Exam which should load densities and structures
-    ex = Exam(hu_lut_path=str(lut_path), dicom_folder=str(dicom_dir))
+    ex = Exam(hu_lut_path=str(lut_path), dicom_dir=str(dicom_dir))
     assert hasattr(ex, "structure_set")
     assert ex.structure_set is not None
     assert hasattr(ex, "densities_masked")

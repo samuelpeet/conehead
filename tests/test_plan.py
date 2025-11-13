@@ -1,12 +1,10 @@
-import os
-import tempfile
 import pytest
 import pydicom.uid
 from pydicom.dataset import FileDataset, FileMetaDataset, Dataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
-import toml
+import numpy as np
 
-from conehead.plan import Plan, Beam, ControlPoint
+from conehead.plan import Plan, ControlPoint
 
 
 def _make_rtplan_dataset():
@@ -28,9 +26,12 @@ def _make_rtplan_dataset():
 
     fgs = Dataset()
     fgs.FractionGroupNumber = 1
-    rbs = Dataset()
-    rbs.ReferencedBeamNumber = 1
-    fgs.ReferencedBeamSequence = [rbs]
+
+    rb = Dataset()
+    rb.ReferencedBeamNumber = 1
+    rb.BeamMeterset = 100
+
+    fgs.ReferencedBeamSequence = [rb]
     rt.FractionGroupSequence = [fgs]
 
     # Build a simple BeamSequence with one beam and two control points
@@ -39,14 +40,22 @@ def _make_rtplan_dataset():
     b.BeamName = "Beam1"
     b.BeamType = "STATIC"
     b.IsocenterPosition = [0.0, 0.0, 0.0]
+    bld0 = Dataset()
+    bld0.RTBeamLimitingDeviceType = "ASYMX"
+    bld0.NumberOfLeafJawPairs = 1
+    bld1 = Dataset()
+    bld1.RTBeamLimitingDeviceType = "MLCX"
+    bld1.NumberOfLeafJawPairs = 2
+    bld1.LeafPositionBoundaries = [-10.0, -5.0, 0.0, 5.0, 10.0]
+    b.BeamLimitingDeviceSequence = [bld0, bld1]
 
     # Control points
     cp0 = Dataset()
     cp0.GantryAngle = 0.0
     cp0.BeamLimitingDeviceAngle = 0.0
     cp0.PatientSupportAngle = 0.0
-
-    # add a BeamLimitingDevicePositionSequence with LeafJawPositions
+    cp0.NominalBeamEnergy = 6
+    cp0.IsocenterPosition = [0.0, 0.0, 0.0]
     bld0 = Dataset()
     bld0.RTBeamLimitingDeviceType = "ASYMX"
     bld0.LeafJawPositions = [-10.0, 10.0]
@@ -86,8 +95,8 @@ def test_plan_from_dataset_parses_basic_fields():
     # control point fields
     cp = beam.control_points[0]
     assert isinstance(cp, ControlPoint)
-    assert cp.gantry_angle == 0.0
-    assert cp.x_jaw_positions is not None
+    assert cp.gantry == 0.0
+    assert cp.jaw_x_positions is not None
 
 
 def test_plan_from_path_and_summary(tmp_path):
@@ -95,7 +104,7 @@ def test_plan_from_path_and_summary(tmp_path):
     pfile = tmp_path / "rtplan.dcm"
     ds.save_as(str(pfile), enforce_file_format=True)
 
-    p = Plan(path=str(pfile))
+    p = Plan(dicom_dir=str(tmp_path))
     s = p.summary()
     assert s["plan_label"] in ("TESTPLAN", None)
     assert s["num_beams"] == 1
@@ -109,7 +118,7 @@ def test_get_beam_controlpoint_structure():
     # verify ControlPoint indexes are sequential and accessible
     assert [cp.index for cp in b.control_points] == [0, 1]
     # verify jaw positions captured from nested sequence
-    j0 = b.control_points[0].x_jaw_positions
-    assert isinstance(j0, list)
+    j0 = b.control_points[0].jaw_x_positions
+    assert isinstance(j0, np.ndarray)
     # values are converted from mm to cm in the Plan loader
     assert pytest.approx(j0[0]) == -1.0

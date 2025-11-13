@@ -298,7 +298,8 @@ class Exam:
         ]
         if len(dicom_files) == 0:
             # No RT Struct file found
-            return None
+            self.structure_set = None
+            return
         if len(dicom_files) > 1:
             raise ValueError(
                 f"Multiple RT Structure Set DICOM files found in folder: {dicom_folder}"
