@@ -2,7 +2,7 @@
 
 Example
 -------
-python scripts/compute_plan.py \
+python cli.py \
     --settings Truebeam_6FFF_M120.toml \
     --dicom-dir "Prostate 3DCRT" \
     --corner -26.96,-23.12,-10.20 \
@@ -23,7 +23,7 @@ def _parse_tuple(s: str, cast_type):
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="conehead-compute")
+    p = argparse.ArgumentParser(prog="conehead")
     p.add_argument("--settings", required=True, help="Path to machine settings TOML")
     p.add_argument("--dicom-dir", required=True, help="Directory with CT/RTPLAN/RTSTRUCT")
     p.add_argument("--corner", required=True, help="Grid corner in cm as x,y,z")
