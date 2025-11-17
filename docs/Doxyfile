@@ -34,5 +34,10 @@ ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
 EXPAND_ONLY_PREDEF     = NO
 
+# Optional input filter to normalise CUDA qualifiers and helper types
+# before Doxygen parses the file. When present the filter should read
+# the original source on stdin and write cleaned source to stdout.
+INPUT_FILTER           = "python3 docs/doxygen/filter_cuda.py"
+
 # Optional: remove path prefixes in XML output (helpful for links)
 STRIP_FROM_PATH        = $(PROJECT_SOURCE_DIR)
