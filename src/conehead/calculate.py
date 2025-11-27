@@ -7,6 +7,7 @@ from conehead.exam import Exam
 from conehead.source import Source
 import conehead_gpu as gpu
 
+import matplotlib.pyplot as plt
 
 def calculate(
     grid: Grid,
@@ -52,14 +53,14 @@ def calculate(
     kernel = Kernel(settings=settings)
 
     # Allocate GPU buffers
-    oad_grid = np.zeros(grid.num_voxels, dtype=np.float32)
-    d_geo_grid = np.zeros(grid.num_voxels, dtype=np.float32)
-    d_eff_grid = np.zeros(grid.num_voxels, dtype=np.float32)
+    oad_grid = np.zeros_like(grid.values, dtype=np.float32)
+    d_geo_grid = np.zeros_like(grid.values, dtype=np.float32)
+    d_eff_grid = np.zeros_like(grid.values, dtype=np.float32)
     density_grid = exam.densities_on_grid(grid).values
-    fluence_grid = np.zeros(grid.num_voxels, dtype=np.float32)
-    terma_grid = np.zeros(grid.num_voxels, dtype=np.float32)
-    mask_grid = np.zeros(grid.num_voxels, dtype=np.float32)
-    dose_grid = np.zeros(grid.num_voxels, dtype=np.float32)
+    fluence_grid = np.zeros_like(grid.values, dtype=np.float32)
+    terma_grid = np.zeros_like(grid.values, dtype=np.float32)
+    mask_grid = np.zeros_like(grid.values, dtype=np.float32)
+    dose_grid = np.zeros_like(grid.values, dtype=np.float32)
 
     # Perform GPU calculations
     gpu.oad(
@@ -71,7 +72,17 @@ def calculate(
         source_v_x=source.v_x,
         source_v_y=source.v_y,
         source_v_z=source.v_z,
+        source_isocenter=source.isocenter,
     )
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    axes[0].imshow(oad_grid[:, :, 138], aspect='equal', cmap='jet')
+    axes[0].set_title("X slice")
+    axes[1].imshow(oad_grid[:, 103, :], aspect='equal', cmap='jet')
+    axes[1].set_title("Y slice")
+    axes[2].imshow(oad_grid[69, :, :], aspect='equal', cmap='jet')
+    axes[2].set_title("Z slice")
+    plt.tight_layout()
+    plt.show()
     gpu.d_geo(
         d_geo_grid=d_geo_grid,
         num_voxels=grid.num_voxels,
@@ -87,6 +98,7 @@ def calculate(
         density_grid=density_grid,
         source_position=source.position,
     )
+    print(f"Source collimator angle: {source.collimator}")
     gpu.fluence(
         fluence_grid=fluence_grid,
         fluence_map_pri=fluence_map_pri,
@@ -99,11 +111,23 @@ def calculate(
         source_v_x=source.v_x,
         source_v_y=source.v_y,
         source_v_z=source.v_z,
+        source_isocenter=source.isocenter,
         source_sad=source.sad,
         pri_z=np.float32(settings["sources"]["pri_z"]),
         sec_z=np.float32(settings["sources"]["sec_z"]),
-        samples=np.int32(settings["sources"]["samples"]),
+        samples=np.int32(settings["calculation"]["fluence_resampling"]),
     )
+    print(f"Source collimator angle: {source.collimator}")
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    axes[0].imshow(fluence_grid[:, :, 138], aspect='equal', cmap='plasma')
+    axes[0].set_title("X slice")
+    axes[1].imshow(fluence_grid[:, 103, :], aspect='equal', cmap='plasma')
+    axes[1].set_title("Y slice")
+    axes[2].imshow(fluence_grid[69, :, :], aspect='equal', cmap='plasma')
+    axes[2].set_title("Z slice")
+    plt.tight_layout()
+    plt.show()
+
     gpu.terma(
         terma_grid=terma_grid,
         fluence_grid=fluence_grid,

@@ -27,13 +27,19 @@ static __device__ __forceinline__ bool line_plane_collision_device(float3* out_p
     const float3& ray_start,
     const float3& ray_direction,
     const float3& plane_normal,
+    const float3& plane_point,
     float epsilon)
 {
     float ndotu = dot3_device(plane_normal, ray_direction);
     if (fabsf(ndotu) < epsilon) {
         return false;
     }
-    float si = -dot3_device(plane_normal, ray_start) / ndotu;
+    // Plane equation: dot(normal, point - plane_point) = 0
+    float3 ray_to_plane;
+    ray_to_plane.x = plane_point.x - ray_start.x;
+    ray_to_plane.y = plane_point.y - ray_start.y;
+    ray_to_plane.z = plane_point.z - ray_start.z;
+    float si = dot3_device(plane_normal, ray_to_plane) / ndotu;
     out_pos_plane->x = ray_start.x + si * ray_direction.x;
     out_pos_plane->y = ray_start.y + si * ray_direction.y;
     out_pos_plane->z = ray_start.z + si * ray_direction.z;

@@ -37,6 +37,7 @@
  * @param source_v_x           Device pointer to float[3] source basis vector X.
  * @param source_v_y           Device pointer to float[3] source basis vector Y (plane normal).
  * @param source_v_z           Device pointer to float[3] source basis vector Z.
+ * @param source_isocenter     Device pointer to float[3] isocenter position (point on fluence plane).
  * @param source_sad           Source-to-axis distance used in rescaling.
  * @param pri_z                Primary fluence map z coord (used in inverse-square).
  * @param sec_z                Secondary fluence map z coord.
@@ -57,6 +58,7 @@ __global__ void fluence(float* fluence_grid,
     float* source_v_x,
     float* source_v_y,
     float* source_v_z,
+    float* source_isocenter,
     float source_sad,
     float pri_z,
     float sec_z,
@@ -78,6 +80,7 @@ __global__ void fluence(float* fluence_grid,
         float3 source_v_x_f3 = make_float3(source_v_x[0], source_v_x[1], source_v_x[2]);
         float3 source_v_y_f3 = make_float3(source_v_y[0], source_v_y[1], source_v_y[2]);
         float3 source_v_z_f3 = make_float3(source_v_z[0], source_v_z[1], source_v_z[2]);
+        float3 source_isocenter_f3 = make_float3(source_isocenter[0], source_isocenter[1], source_isocenter[2]);
         float3 position_f3 = make_float3(0.0f, 0.0f, 0.0f);
         float3 offset_f3 = make_float3(0.0f, 0.0f, 0.0f);
         float3 pos_sample_f3 = make_float3(0.0f, 0.0f, 0.0f);
@@ -96,6 +99,8 @@ __global__ void fluence(float* fluence_grid,
         offset_f3.y = resolution_f3.y / samples;
         offset_f3.z = resolution_f3.z / samples;
 
+        // Collimator rotation is already encoded in source_v_* basis vectors
+
         float fluence_pri = 0;
         float fluence_sec = 0;
         for (int ix = 0; ix < samples; ix++) {
@@ -110,16 +115,21 @@ __global__ void fluence(float* fluence_grid,
                     ray_direction_f3.x = source_position_f3.x - pos_sample_f3.x;
                     ray_direction_f3.y = source_position_f3.y - pos_sample_f3.y;
                     ray_direction_f3.z = source_position_f3.z - pos_sample_f3.z;
-                    line_plane_collision_device(&pos_plane_f3, source_position_f3, ray_direction_f3, source_v_y_f3, 1e-6f);
+                    line_plane_collision_device(&pos_plane_f3, source_position_f3, ray_direction_f3, source_v_y_f3, source_isocenter_f3, 1e-6f);
 
-                    // Convert to source coords
-                    pos_fluence_map_f3.x = dot3_device(source_v_x_f3, pos_plane_f3);
-                    pos_fluence_map_f3.y = dot3_device(source_v_y_f3, pos_plane_f3);
-                    pos_fluence_map_f3.z = dot3_device(source_v_z_f3, pos_plane_f3);
+                    // Convert to source coords (relative to isocenter)
+                    float3 pos_rel_isocenter;
+                    pos_rel_isocenter.x = pos_plane_f3.x - source_isocenter_f3.x;
+                    pos_rel_isocenter.y = pos_plane_f3.y - source_isocenter_f3.y;
+                    pos_rel_isocenter.z = pos_plane_f3.z - source_isocenter_f3.z;
+                    pos_fluence_map_f3.x = dot3_device(source_v_x_f3, pos_rel_isocenter);
+                    pos_fluence_map_f3.y = dot3_device(source_v_y_f3, pos_rel_isocenter);
+                    pos_fluence_map_f3.z = dot3_device(source_v_z_f3, pos_rel_isocenter);
 
-                    // Reduce to 2D
+                    // Reduce to 2D in source-local plane (x,z)
+                    // Flip Z to correct BEV mirroring (left-right preserved)
                     pos_fluence_map_2d_f2.x = pos_fluence_map_f3.x;
-                    pos_fluence_map_2d_f2.y = pos_fluence_map_f3.z;
+                    pos_fluence_map_2d_f2.y = -pos_fluence_map_f3.z;
 
                     // Accumulate fluence from primary and secondary sources
                     fluence_pri = fluence_pri + fluence_map_lookup_device(pos_fluence_map_2d_f2, fluence_map_pri) / (samples * samples * samples);
@@ -164,6 +174,7 @@ __global__ void fluence(float* fluence_grid,
  * @param source_v_x         NumPy array float[3] source basis vector X.
  * @param source_v_y         NumPy array float[3] source basis vector Y (plane normal).
  * @param source_v_z         NumPy array float[3] source basis vector Z.
+ * @param source_isocenter   NumPy array float[3] isocenter position (point on fluence plane).
  * @param source_sad         Source-to-axis distance used in rescaling.
  * @param pri_z              Primary fluence map z coord (pri_z used in inverse-square).
  * @param sec_z              Secondary fluence map z coord (sec_z used in inverse-square).
@@ -177,7 +188,7 @@ __global__ void fluence(float* fluence_grid,
 void map_fluence(pybind11::array_t<float> fluence_grid, pybind11::array_t<float> fluence_map_pri, pybind11::array_t<float> fluence_map_sec, pybind11::array_t<int> num_voxels,
     pybind11::array_t<float> corner, pybind11::array_t<float> resolution, pybind11::array_t<float> d_geo_grid,
     pybind11::array_t<float> source_position, pybind11::array_t<float> source_v_x, pybind11::array_t<float> source_v_y,
-    pybind11::array_t<float> source_v_z, float source_sad,
+    pybind11::array_t<float> source_v_z, pybind11::array_t<float> source_isocenter, float source_sad,
     float pri_z, float sec_z, int samples)
 {
     pybind11::buffer_info fluence_grid_info = fluence_grid.request();
@@ -191,6 +202,7 @@ void map_fluence(pybind11::array_t<float> fluence_grid, pybind11::array_t<float>
     pybind11::buffer_info source_v_x_info = source_v_x.request();
     pybind11::buffer_info source_v_y_info = source_v_y.request();
     pybind11::buffer_info source_v_z_info = source_v_z.request();
+    pybind11::buffer_info source_isocenter_info = source_isocenter.request();
 
     float* fluence_grid_ptr = reinterpret_cast<float*>(fluence_grid_info.ptr);
     float* fluence_map_pri_ptr = reinterpret_cast<float*>(fluence_map_pri_info.ptr);
@@ -203,9 +215,14 @@ void map_fluence(pybind11::array_t<float> fluence_grid, pybind11::array_t<float>
     float* source_v_x_ptr = reinterpret_cast<float*>(source_v_x_info.ptr);
     float* source_v_y_ptr = reinterpret_cast<float*>(source_v_y_info.ptr);
     float* source_v_z_ptr = reinterpret_cast<float*>(source_v_z_info.ptr);
+    float* source_isocenter_ptr = reinterpret_cast<float*>(source_isocenter_info.ptr);
+
+
+    // Collimator angle is encoded in the basis; no explicit angle needed
+
 
     // Allocate device memory and copy inputs
-    float *d_fluence_grid, *d_corner, *d_resolution, *d_source_position, *d_source_v_x_ptr, *d_source_v_y_ptr, *d_source_v_z_ptr;
+    float *d_fluence_grid, *d_corner, *d_resolution, *d_source_position, *d_source_v_x_ptr, *d_source_v_y_ptr, *d_source_v_z_ptr, *d_source_isocenter_ptr;
     int* d_num_voxels;
     cudaMalloc(&d_fluence_grid, fluence_grid_info.size * sizeof(float));
     cudaMalloc(&d_num_voxels, num_voxels_info.size * sizeof(int));
@@ -215,6 +232,7 @@ void map_fluence(pybind11::array_t<float> fluence_grid, pybind11::array_t<float>
     cudaMalloc(&d_source_v_x_ptr, source_v_x_info.size * sizeof(float));
     cudaMalloc(&d_source_v_y_ptr, source_v_y_info.size * sizeof(float));
     cudaMalloc(&d_source_v_z_ptr, source_v_z_info.size * sizeof(float));
+    cudaMalloc(&d_source_isocenter_ptr, source_isocenter_info.size * sizeof(float));
     cudaMemcpy(d_fluence_grid, fluence_grid_ptr, fluence_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_num_voxels, num_voxels_ptr, num_voxels_info.size * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_corner, corner_ptr, corner_info.size * sizeof(float), cudaMemcpyHostToDevice);
@@ -223,6 +241,7 @@ void map_fluence(pybind11::array_t<float> fluence_grid, pybind11::array_t<float>
     cudaMemcpy(d_source_v_x_ptr, source_v_x_ptr, source_v_x_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_source_v_y_ptr, source_v_y_ptr, source_v_y_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_source_v_z_ptr, source_v_z_ptr, source_v_z_info.size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_source_isocenter_ptr, source_isocenter_ptr, source_isocenter_info.size * sizeof(float), cudaMemcpyHostToDevice);
 
     // Create texture object from host density array (helper in texture_utils.cuh)
     Texture3DHandle d_geo_tex_handle = create_texture3d_from_ptr(d_geo_grid_ptr, num_voxels_ptr[0], num_voxels_ptr[1], num_voxels_ptr[2], cudaFilterModeLinear);
@@ -241,7 +260,7 @@ void map_fluence(pybind11::array_t<float> fluence_grid, pybind11::array_t<float>
     // Pass texture objects for the fluence maps and d_geo
     fluence<<<dimGrid, dimBlock>>>(d_fluence_grid, fluence_map_pri_tex, fluence_map_sec_tex, d_num_voxels, d_corner,
         d_resolution, d_geo_tex, d_source_position, d_source_v_x_ptr, d_source_v_y_ptr, d_source_v_z_ptr,
-        source_sad, pri_z, sec_z, samples);
+        d_source_isocenter_ptr, source_sad, pri_z, sec_z, samples);
 
     // Copy result back to host
     cudaMemcpy(fluence_grid_ptr, d_fluence_grid,
@@ -256,6 +275,7 @@ void map_fluence(pybind11::array_t<float> fluence_grid, pybind11::array_t<float>
     cudaFree(d_source_v_x_ptr);
     cudaFree(d_source_v_y_ptr);
     cudaFree(d_source_v_z_ptr);
+    cudaFree(d_source_isocenter_ptr);
 
     // Destroy textures and free CUDA arrays (helpers)
     destroy_texture3d(d_geo_tex_handle);

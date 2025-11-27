@@ -1,4 +1,12 @@
 # %%
+
+# For dev
+import sys
+import os
+sys.path.append(os.path.join(os.getcwd(), "../build/"))
+import matplotlib.pyplot as plt
+
+
 import numpy as np
 import toml
 from conehead.dicom import export_dose
@@ -14,13 +22,13 @@ from conehead.calculate import calculate
 settings = toml.load("Truebeam_6FFF_M120.toml")
 
 # Load CT/Structure Set and Plan
-dicom_dir = "Prostate 3DCRT"
+dicom_dir = "Prostate Wedge"
 exam = Exam(dicom_dir=f"{dicom_dir}", hu_lut_path="Siemens_Confidence.toml")
 plan = Plan(dicom_dir=f"{dicom_dir}")
 
 # Define grid geometry for dose calculation
 grid = Grid(
-    corner=np.array([-26.96, -23.12, -10.20], dtype=np.float32),
+    corner=np.array([-26.97, -23.12, -10.20], dtype=np.float32),
     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
     num_voxels=np.array([267, 206, 138], dtype=np.int32),
 )
@@ -38,15 +46,19 @@ for beam in plan.beams:
         cp = beam.control_points[0]
 
         # Initialise the source geometry
-        source = Source()
+        source = Source(isocenter=beam.isocenter_position)
         source.gantry = cp.gantry
-        source.collimator = cp.collimator
+        source.collimator = cp.collimator + 90.0
+        print(f"Collimator, Gantry: {source.collimator}, {source.gantry}")
+        print(f"Source position: {source.position}")
+        print(f"Isocenter: {source.isocenter}")
 
         # Initalise the block and compute the fluence maps
         block = Block(control_point=cp, settings=settings)
         fluence_map_pri, fluence_map_sec = block.get_fluence_maps()
 
         # Pass everything through to the dose calculation function
+        print(f"Calculating beam: {beam.name}")
         beam.dose.values += calculate(  # type: ignore
             grid,
             source,
@@ -57,8 +69,8 @@ for beam in plan.beams:
             cp.jaw_y_positions,
             settings,
         )
-        # Scale the dose by the beam MU
-        beam.dose.values *= beam.mu  # type: ignore
+        # Scale the dose by the beam MU and fraction number
+        beam.dose.values *= beam.mu * plan.num_fractions  # type: ignore
 
     elif beam.type == "DYNAMIC":
         # This value means that multiple control point attributes change from one control point to
@@ -81,6 +93,9 @@ for beam in plan.beams:
         # range starting from 6 o'clock and going clockwise.
         control_points = beam.control_points
         gantry_angles = [((float(cp.gantry) + 180.0) % 360.0) for cp in control_points]
+
+        # Create the source and offset the dose grid as per the isocenter position
+
 
         # Now we want to iterate through the gantry angles and group the control points into sectors.
         # We start from the first angle and keep adding control points until we exceed the sector
@@ -125,7 +140,7 @@ for beam in plan.beams:
             sector_end_angle = (sector[-1].gantry + 180.0) % 360.0
             sector_mid_angle = (sector_start_angle + sector_end_angle) / 2
             sector_mid_angle = (sector_mid_angle + 180.0) % 360.0  # Map back to -180 to 180 range
-            source = Source()
+            source = Source(isocenter=beam.isocenter_position)            
             source.gantry = np.float32(sector_mid_angle)
             source.collimator = np.float32(sector[0].collimator)
 
@@ -150,8 +165,8 @@ for beam in plan.beams:
             )
             # The calculation for this sector is now complete.
 
-        # Scale the dose by the beam MU
-        beam.dose.values *= beam.mu  # type: ignore
+        # Scale the dose by the beam MU and fraction number
+        beam.dose.values *= beam.mu * plan.num_fractions  # type: ignore
 
 # At this point, all beams have been processed and their dose distributions calculated.
 # Let's sum the dose from all beams to get the total dose distribution for the plan.
@@ -166,7 +181,9 @@ export_dose(
     plan=plan,
     exam=exam,
     info_in_file_name=True,
-    beam_doses=False,
+    beam_doses=True,
 )
 
 # Job's done!
+
+# %%

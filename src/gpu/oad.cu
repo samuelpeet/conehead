@@ -42,7 +42,8 @@ __global__ void oad(float* oad_grid,
     float* source_position,
     float* source_v_x,
     float* source_v_y,
-    float* source_v_z)
+    float* source_v_z,
+    float* source_isocenter)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -63,6 +64,7 @@ __global__ void oad(float* oad_grid,
         float3 distance_f3 = make_float3(0.0f, 0.0f, 0.0f);
         float3 pos_plane_f3 = make_float3(0.0f, 0.0f, 0.0f);
         float3 pos_source_f3 = make_float3(0.0f, 0.0f, 0.0f);
+        float3 source_isocenter_f3 = make_float3(source_isocenter[0], source_isocenter[1], source_isocenter[2]);
 
         // Get voxel position
         position_f3.x = corner_f3.x + resolution_f3.x * (x + 0.5);
@@ -74,13 +76,18 @@ __global__ void oad(float* oad_grid,
         distance_f3.y = source_position_f3.y - position_f3.y;
         distance_f3.z = source_position_f3.z - position_f3.z;
 
-        // Project position to iso plane
-        line_plane_collision_device(&pos_plane_f3, source_position_f3, distance_f3, source_v_y_f3, 1e-6f);
+        // Project position to isocenter plane (plane through isocenter with normal source_v_y)
+        float3 plane_point = source_isocenter_f3;
+        line_plane_collision_device(&pos_plane_f3, source_position_f3, distance_f3, source_v_y_f3, plane_point, 1e-6f);
 
-        // Convert to source coords
-        pos_source_f3.x = dot3_device(source_v_x_f3, pos_plane_f3);
-        pos_source_f3.y = dot3_device(source_v_y_f3, pos_plane_f3);
-        pos_source_f3.z = dot3_device(source_v_z_f3, pos_plane_f3);
+        // Convert to source-local coords relative to isocenter
+        float3 pos_rel_iso;
+        pos_rel_iso.x = pos_plane_f3.x - source_isocenter_f3.x;
+        pos_rel_iso.y = pos_plane_f3.y - source_isocenter_f3.y;
+        pos_rel_iso.z = pos_plane_f3.z - source_isocenter_f3.z;
+        pos_source_f3.x = dot3_device(source_v_x_f3, pos_rel_iso);
+        pos_source_f3.y = dot3_device(source_v_y_f3, pos_rel_iso);
+        pos_source_f3.z = dot3_device(source_v_z_f3, pos_rel_iso);
         int idx = x + y * nx + z * nx * ny;
         oad_grid[idx] = sqrt(pos_source_f3.x * pos_source_f3.x + pos_source_f3.z * pos_source_f3.z);
     }
@@ -132,7 +139,8 @@ __global__ void oad(float* oad_grid,
 void map_oad(pybind11::array_t<float> oad_grid, pybind11::array_t<int> num_voxels,
     pybind11::array_t<float> corner, pybind11::array_t<float> resolution,
     pybind11::array_t<float> source_position, pybind11::array_t<float> source_v_x,
-    pybind11::array_t<float> source_v_y, pybind11::array_t<float> source_v_z)
+    pybind11::array_t<float> source_v_y, pybind11::array_t<float> source_v_z,
+    pybind11::array_t<float> source_isocenter)
 {
     pybind11::buffer_info oad_info = oad_grid.request();
     pybind11::buffer_info num_voxels_info = num_voxels.request();
@@ -142,6 +150,7 @@ void map_oad(pybind11::array_t<float> oad_grid, pybind11::array_t<int> num_voxel
     pybind11::buffer_info source_v_x_info = source_v_x.request();
     pybind11::buffer_info source_v_y_info = source_v_y.request();
     pybind11::buffer_info source_v_z_info = source_v_z.request();
+    pybind11::buffer_info source_isocenter_info = source_isocenter.request();
 
     float* oad_ptr = reinterpret_cast<float*>(oad_info.ptr);
     int* num_voxels_ptr = reinterpret_cast<int*>(num_voxels_info.ptr);
@@ -151,9 +160,10 @@ void map_oad(pybind11::array_t<float> oad_grid, pybind11::array_t<int> num_voxel
     float* source_v_x_ptr = reinterpret_cast<float*>(source_v_x_info.ptr);
     float* source_v_y_ptr = reinterpret_cast<float*>(source_v_y_info.ptr);
     float* source_v_z_ptr = reinterpret_cast<float*>(source_v_z_info.ptr);
+    float* source_isocenter_ptr = reinterpret_cast<float*>(source_isocenter_info.ptr);
 
     // Allocate device memory and copy inputs
-    float *d_oad_grid, *d_corner, *d_resolution, *d_source_position, *d_source_v_x, *d_source_v_y, *d_source_v_z;
+    float *d_oad_grid, *d_corner, *d_resolution, *d_source_position, *d_source_v_x, *d_source_v_y, *d_source_v_z, *d_source_isocenter;
     int* d_num_voxels;
     cudaMalloc(&d_oad_grid, oad_info.size * sizeof(float));
     cudaMalloc(&d_num_voxels, num_voxels_info.size * sizeof(int));
@@ -163,6 +173,7 @@ void map_oad(pybind11::array_t<float> oad_grid, pybind11::array_t<int> num_voxel
     cudaMalloc(&d_source_v_x, source_v_x_info.size * sizeof(float));
     cudaMalloc(&d_source_v_y, source_v_y_info.size * sizeof(float));
     cudaMalloc(&d_source_v_z, source_v_z_info.size * sizeof(float));
+    cudaMalloc(&d_source_isocenter, source_isocenter_info.size * sizeof(float));
     cudaMemcpy(d_oad_grid, oad_ptr, oad_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_num_voxels, num_voxels_ptr, num_voxels_info.size * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_corner, corner_ptr, corner_info.size * sizeof(float), cudaMemcpyHostToDevice);
@@ -171,6 +182,7 @@ void map_oad(pybind11::array_t<float> oad_grid, pybind11::array_t<int> num_voxel
     cudaMemcpy(d_source_v_x, source_v_x_ptr, source_v_x_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_source_v_y, source_v_y_ptr, source_v_y_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_source_v_z, source_v_z_ptr, source_v_z_info.size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_source_isocenter, source_isocenter_ptr, source_isocenter_info.size * sizeof(float), cudaMemcpyHostToDevice);
 
     // Launch kernel
     dim3 dimBlock(16, 4, 4);
@@ -179,7 +191,7 @@ void map_oad(pybind11::array_t<float> oad_grid, pybind11::array_t<int> num_voxel
         (num_voxels_ptr[2] + dimBlock.z - 1) / dimBlock.z);
 
     oad<<<dimGrid, dimBlock>>>(d_oad_grid, d_num_voxels, d_corner,
-        d_resolution, d_source_position, d_source_v_x, d_source_v_y, d_source_v_z);
+        d_resolution, d_source_position, d_source_v_x, d_source_v_y, d_source_v_z, d_source_isocenter);
 
     // Copy result back to host
     cudaMemcpy(oad_ptr, d_oad_grid,
@@ -194,4 +206,5 @@ void map_oad(pybind11::array_t<float> oad_grid, pybind11::array_t<int> num_voxel
     cudaFree(d_source_v_x);
     cudaFree(d_source_v_y);
     cudaFree(d_source_v_z);
+    cudaFree(d_source_isocenter);
 }

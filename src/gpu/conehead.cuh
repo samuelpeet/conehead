@@ -19,7 +19,8 @@ __global__ void oad(float* oad_grid,
     float* source_position,
     float* source_v_x,
     float* source_v_y,
-    float* source_v_z);
+    float* source_v_z,
+    float* source_isocenter);
 
 __global__ void d_eff(float* d_eff_grid,
     int* num_voxels,
@@ -39,6 +40,7 @@ __global__ void fluence(float* fluence_grid,
     float* source_v_x,
     float* source_v_y,
     float* source_v_z,
+    float* source_isocenter,
     float source_sad,
     float pri_z,
     float sec_z,
@@ -96,7 +98,8 @@ void map_d_geo(pybind11::array_t<float> d_geo_grid, pybind11::array_t<int> num_v
 void map_oad(pybind11::array_t<float> oad_grid, pybind11::array_t<int> num_voxels,
     pybind11::array_t<float> corner, pybind11::array_t<float> resolution,
     pybind11::array_t<float> source_position, pybind11::array_t<float> source_v_x,
-    pybind11::array_t<float> source_v_y, pybind11::array_t<float> source_v_z);
+    pybind11::array_t<float> source_v_y, pybind11::array_t<float> source_v_z,
+    pybind11::array_t<float> source_isocenter);
 
 void map_d_eff(pybind11::array_t<float> d_eff_grid, pybind11::array_t<int> num_voxels,
     pybind11::array_t<float> corner, pybind11::array_t<float> resolution,
@@ -107,7 +110,7 @@ void map_fluence(pybind11::array_t<float> fluence_grid,
     pybind11::array_t<int> num_voxels, pybind11::array_t<float> corner,
     pybind11::array_t<float> resolution, pybind11::array_t<float> d_geo_grid,
     pybind11::array_t<float> source_position, pybind11::array_t<float> source_v_x, pybind11::array_t<float> source_v_y,
-    pybind11::array_t<float> source_v_z, float source_sad,
+    pybind11::array_t<float> source_v_z, pybind11::array_t<float> source_isocenter, float source_sad,
     float pri_z, float sec_z,
     int samples);
 

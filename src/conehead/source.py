@@ -30,9 +30,14 @@ class Source:
     ----------
     sad : float, optional
         Source-to-axis distance in centimetres. Default is 100 cm.
+    isocenter : array_like, shape (3,), optional
+        3D coordinates (x, y, z) of the isocenter in cm. The source
+        will rotate around this point. Default is [0, 0, 0].
 
     Attributes
     ----------
+    isocenter : ndarray, shape (3,)
+        The point in space around which the source rotates (cm).
     position : ndarray, shape (3,)
         3D coordinates of the source in the patient coordinate system
         (cm). The default origin is such that the isocentre lies at
@@ -45,14 +50,28 @@ class Source:
         from the source towards the isocentre.
     """
 
-    def __init__(self, sad: np.float32 = np.float32(100)):
+    def __init__(
+        self,
+        sad: np.float32 = np.float32(100),
+        isocenter: npt.ArrayLike = None,
+    ):
         # Initialize source to gantry and collimator zero
         self._sad: np.float32 = sad
         self._gantry: np.float32 = np.float32(0)
         self._collimator: np.float32 = np.float32(0)
+        
+        # Store the isocenter (point around which source rotates)
+        if isocenter is None:
+            self._isocenter: npt.NDArray[np.float32] = np.array([0, 0, 0], dtype=np.float32)
+        else:
+            self._isocenter: npt.NDArray[np.float32] = np.array(isocenter, dtype=np.float32)
+        
         # Default starting position: source on the negative Y axis
-        # at distance SAD from isocentre (units: cm)
-        self._position: npt.NDArray[np.float32] = np.array([0, -self._sad, 0], dtype=np.float32)
+        # at distance SAD from isocenter (units: cm)
+        self._position: npt.NDArray[np.float32] = np.array(
+            [self._isocenter[0], self._isocenter[1] - self._sad, self._isocenter[2]],
+            dtype=np.float32,
+        )
 
         # Basis of source local coordinate system (beam-eye view)
         self.v_x: npt.NDArray[np.float32] = np.array([1, 0, 0], dtype=np.float32)
@@ -82,6 +101,28 @@ class Source:
         return self._sad
 
     @property
+    def isocenter(self) -> npt.NDArray[np.float32]:
+        return self._isocenter
+
+    @isocenter.setter
+    def isocenter(self, new_isocenter: npt.NDArray[np.float32]):
+        """Set a new isocenter and update source geometry.
+
+        Parameters
+        ----------
+        new_isocenter : array_like, shape (3,)
+            New isocenter coordinates (x, y, z) in cm.
+
+        Notes
+        -----
+        Changing the isocenter will recompute the source position
+        to maintain the current gantry and collimator angles around
+        the new center of rotation.
+        """
+        self._isocenter = np.array(new_isocenter, dtype=np.float32)
+        self._update_geometry()
+
+    @property
     def gantry(self) -> np.float32:
         return self._gantry
 
@@ -109,10 +150,9 @@ class Source:
         Parameters
         ----------
         theta : float
-            The collimator angle in degrees. Must be within the range [0, 360).
+            The collimator angle in degrees. Will be normalized to [0, 360).
         """
-        assert theta >= 0 and theta < 360, "Invalid collimator angle"
-        self._collimator: np.float32 = theta
+        self._collimator: np.float32 = np.float32(theta % 360)
         self._update_geometry()
 
     def _update_geometry(self):
@@ -124,16 +164,24 @@ class Source:
         the gantry rotation. The method computes the new cartesian
         position of the source and two successive rotations to build the
         beam basis (collimator then gantry).
+        
+        The source rotates around the isocenter at distance SAD.
         """
 
         # Compute source cartesian position from the gantry angle.
+        # First compute position relative to isocenter, then translate.
         theta = self._gantry
-        # Convert to IEC-style polar angle (phi) and compute X/Y
+        # Convert to IEC-style polar angle (phi) and compute X/Y relative to isocenter
         phi: np.float32 = (np.float32(90) - theta) % np.float32(360)  # IEC 61217
-        x: np.float32 = self.sad * np.cos(phi * np.pi / 180)
-        y: np.float32 = self.sad * -np.sin(phi * np.pi / 180)
-        z: np.float32 = self.position[2]
-        self.position = np.array([x, y, z])
+        x_rel: np.float32 = self.sad * np.cos(phi * np.pi / 180)
+        y_rel: np.float32 = self.sad * -np.sin(phi * np.pi / 180)
+        z_rel: np.float32 = np.float32(0)  # Source stays in isocenter Z-plane
+        
+        # Translate to absolute coordinates by adding isocenter offset
+        x: np.float32 = x_rel + self._isocenter[0]
+        y: np.float32 = y_rel + self._isocenter[1]
+        z: np.float32 = z_rel + self._isocenter[2]
+        self.position = np.array([x, y, z], dtype=np.float32)
 
         # Start from canonical basis and apply collimator then gantry
         # rotations. Collimator rotation is a rotation about the local
