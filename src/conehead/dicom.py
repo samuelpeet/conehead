@@ -86,21 +86,20 @@ def export_dose(
     # export call so multiple invocations do not collide.
     series_uid = generate_uid()
     implementation_uid = generate_uid()  # consider hardcoding per release
-    frame_of_reference_uid = generate_uid()
 
     # unique SOP Instance UID per exported RTDOSE
     instance_uid = generate_uid()
 
-    # Build filename
-    if info_in_file_name:
-        filename = f"{output_dir}/RD_{plan.plan_label}_Total.dcm"
-    else:
-        filename = f"{output_dir}/RD{instance_uid}.dcm"
-
-    # Sanitise filename by replacing potentially problematic characters
+    # Sanitise plan name by replacing potentially problematic characters
     invalid_chars = '/\\?%*:|"<> '
     for char in invalid_chars:
-        filename = filename.replace(char, "_")
+        label = plan.plan_label.replace(char, "_")
+
+    # Build filename
+    if info_in_file_name:
+        filename = f"{output_dir}/RD_{label}_Total.dcm"
+    else:
+        filename = f"{output_dir}/RD{instance_uid}.dcm"
 
     # Help the static analyzer: the beam.dose object is a Grid
     dose: Grid = cast(Grid, plan.dose)
@@ -167,6 +166,7 @@ def export_dose(
     ds.StudyID = exam.study_id
     ds.SeriesNumber = "1"
     ds.InstanceNumber = str(1)
+    ds.FrameOfReferenceUID = exam.frame_of_reference_uid
 
     # Spatial orientation/position
     # Our Grid.corner is the corner of the most-negative voxel (not the centre),
@@ -181,7 +181,6 @@ def export_dose(
     # For an axis-aligned grid where +x corresponds to increasing column index
     # and +y to increasing row index:
     ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
-    ds.FrameOfReferenceUID = frame_of_reference_uid
 
     # Pixel data descriptors
     ds.SamplesPerPixel = 1
@@ -249,16 +248,16 @@ def export_dose(
             # unique SOP Instance UID per exported RTDOSE
             instance_uid = generate_uid()
 
-            # Build filename
-            if info_in_file_name and getattr(beam, "name", None):
-                filename = f"{output_dir}/RD_{plan.plan_label}_{beam.name}.dcm"
-            else:
-                filename = f"{output_dir}/RD{instance_uid}.dcm"
-
-            # Sanitise filename by replacing potentially problematic characters
+            # Sanitise plan name by replacing potentially problematic characters
             invalid_chars = '/\\?%*:|"<> '
             for char in invalid_chars:
-                filename = filename.replace(char, "_")
+                label = plan.plan_label.replace(char, "_")
+
+            # Build filename
+            if info_in_file_name and getattr(beam, "name", None):
+                filename = f"{output_dir}/RD_{label}_{beam.name}.dcm"
+            else:
+                filename = f"{output_dir}/RD{instance_uid}.dcm"
 
             # Help the static analyzer: the beam.dose object is a Grid
             dose: Grid = cast(Grid, beam.dose)
@@ -325,6 +324,8 @@ def export_dose(
             ds.StudyID = exam.study_id
             ds.SeriesNumber = "1"
             ds.InstanceNumber = str(i + 1)
+            ds.FrameOfReferenceUID = exam.frame_of_reference_uid
+
 
             # Spatial orientation/position
             # Our Grid.corner is the corner of the most-negative voxel (not the centre),
@@ -339,7 +340,6 @@ def export_dose(
             # For an axis-aligned grid where +x corresponds to increasing column index
             # and +y to increasing row index:
             ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
-            ds.FrameOfReferenceUID = frame_of_reference_uid
 
             # Pixel data descriptors
             ds.SamplesPerPixel = 1

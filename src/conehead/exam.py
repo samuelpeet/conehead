@@ -221,6 +221,7 @@ class Exam:
         self.study_date = first_slice.StudyDate
         self.study_time = first_slice.StudyTime
         self.study_id = first_slice.StudyID
+        self.frame_of_reference_uid = first_slice.FrameOfReferenceUID
 
         rows = first_slice.Rows
         cols = first_slice.Columns

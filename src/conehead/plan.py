@@ -214,7 +214,7 @@ class Plan:
         frac_group_seq = getattr(ds, "FractionGroupSequence", None) or []
         if frac_group_seq == [] or frac_group_seq is None:
             raise ValueError("FractionGroupSequence is missing from the RT Plan dataset.")
-        self.num_fractions = getattr(ds, "NumberOfFractionsPlanned", None)
+        self.num_fractions = getattr(frac_group_seq[0], "NumberOfFractionsPlanned", None)
         ref_beam_seq = (
             getattr(frac_group_seq[0], "ReferencedBeamSequence", None)
             or getattr(frac_group_seq[0], "RTReferencedBeamSequence", None)
@@ -310,7 +310,6 @@ class Plan:
                     if b.NumberOfWedges == 1:
                         wedge_seq = getattr(b, "WedgeSequence")
                         wedge_type = getattr(wedge_seq[0], "WedgeType", None)
-                        print(f"beam number {b.BeamNumber} wedge_type: {wedge_type}")
                         if wedge_type not in ["DYNAMIC"]:
                             raise ValueError(
                                 f"Unsupported WedgeType {wedge_type} found in WedgeSequence"
