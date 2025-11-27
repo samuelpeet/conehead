@@ -78,9 +78,9 @@ def export_dose(
     The dataset is written using :meth:`pydicom.dataset.FileDataset.save_as`.
     """
 
-    # Use UTC timestamps for created instances
-    date_now = datetime.now(timezone.utc).strftime("%Y%m%d")
-    time_now = datetime.now(timezone.utc).strftime("%H%M%S.%f")
+    # Use local timestamps for created instances
+    date_now = datetime.now().strftime("%Y%m%d")
+    time_now = datetime.now().strftime("%H%M%S.%f")
 
     # Series/implementation/frame-of-reference UIDs are generated per
     # export call so multiple invocations do not collide.
