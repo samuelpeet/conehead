@@ -55,19 +55,15 @@ static __device__ __forceinline__ bool line_plane_collision_device(float3* out_p
  */
 static __device__ __forceinline__ float fluence_map_lookup_device(float2 position, cudaTextureObject_t fluence_tex)
 {
-    // Convert world coords (cm) to texture indices (mm -> index space) using
-    // identical mapping as the original flattened-array implementation.
-    float pos_x = floorf(position.x * 10.0f); // cm -> mm
-    float pos_y = floorf(position.y * 10.0f);
-    pos_x = pos_x + 280.0f;
-    pos_y = pos_y + 280.0f;
-    int ix = (int)(pos_x)-1;
-    int iy = (int)(pos_y)-1;
-    if (ix < 0 || ix > 559 || iy < 0 || iy > 559) {
+    // Convert world coords (cm) to texture coordinates (mm index space).
+    // Mapping: mm_index = position_cm*10 + 280, sample at texel center (index + 0.5).
+    float ix = position.x * 10.0f + 280.0f; // mm index along X
+    float iy = position.y * 10.0f + 280.0f; // mm index along Y
+    if (ix < 0.0f || ix > 559.0f || iy < 0.0f || iy > 559.0f) {
         return 0.0f;
     }
     // Sample the 2D texture at the texel center.
-    return tex2D<float>(fluence_tex, (float)ix + 0.5f, (float)iy + 0.5f);
+    return tex2D<float>(fluence_tex, ix + 0.5f, iy + 0.5f);
 }
 
 #endif // CONEHEAD_GPU_DEVICE_FUNCTIONS_CUH

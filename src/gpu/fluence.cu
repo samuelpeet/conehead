@@ -138,7 +138,8 @@ __global__ void fluence(float* fluence_grid,
             }
         }
         // Apply inverse square law
-        float d = tex3D<float>(d_geo_tex, x, y, z);
+        // Sample geometric distance texture at texel centers
+        float d = tex3D<float>(d_geo_tex, x + 0.5f, y + 0.5f, z + 0.5f);
         fluence_pri = fluence_pri * ((source_sad - pri_z) / d) * ((source_sad - pri_z) / d);
         fluence_sec = fluence_sec * ((source_sad - sec_z) / d) * ((source_sad - sec_z) / d);
 

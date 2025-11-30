@@ -341,7 +341,7 @@ class Block:
         -------
         fluence_map_pri, fluence_map_sec : ndarray, ndarray
             Primary and secondary fluence maps as float32 arrays with
-            the target shape (560, 560) by default.
+            the target shape (561, 561) by default.
         """
 
         # Extract source parameters from settings
@@ -376,8 +376,8 @@ class Block:
         y_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
 
         # Define the lower res dimensions of the fluence map to interpolate onto
-        x_target = np.linspace(-28.0, 28.0, 560)  # 560 points from -28 to 28
-        y_target = np.linspace(-28.0, 28.0, 560)  # 560 points from -28 to 28
+        x_target = np.linspace(-28.0, 28.0, 561)  # 561 points from -28 to 28
+        y_target = np.linspace(-28.0, 28.0, 561)  # 561 points from -28 to 28
 
         # Perform interpolation from original res to target res
         X_target, Y_target = np.meshgrid(x_target, y_target)
@@ -407,8 +407,8 @@ class Block:
             factors,
             k=1,
         )
-        x = np.arange(-28, 28, 0.1, dtype=np.float32)
-        y = np.arange(-28, 28, 0.1, dtype=np.float32)
+        x = np.linspace(-28.0, 28.0, 561, dtype=np.float32)
+        y = np.linspace(-28.0, 28.0, 561, dtype=np.float32)
         X, Y = np.meshgrid(x, y)
         r = np.sqrt(X**2 + Y**2)
         bpc = bpc_interp(r)
@@ -429,7 +429,7 @@ class Block:
                 1 - (p[2] * (y + 0.6)) - np.exp(p[3] * (y + 0.6))
             )
             fluence_scaling_2d = np.tile(
-                fluence_scaling, (560, 1)
+                fluence_scaling, (561, 1)
             )  # Make into 2D array of repeating rows
             # If the wedge orientation is 0 degrees, flip the fluence scaling array left-right
             if self.wedge_orientation == 180:

@@ -206,7 +206,6 @@ class Exam:
             "StudyInstanceUID",
             "StudyDate",
             "StudyTime",
-            "StudyID",
             "Columns",
             "SliceThickness",
             "PixelSpacing",
@@ -220,7 +219,6 @@ class Exam:
         self.study_instance_uid = first_slice.StudyInstanceUID
         self.study_date = first_slice.StudyDate
         self.study_time = first_slice.StudyTime
-        self.study_id = first_slice.StudyID
         self.frame_of_reference_uid = first_slice.FrameOfReferenceUID
 
         rows = first_slice.Rows
@@ -257,9 +255,10 @@ class Exam:
         corner = np.array(first_slice.ImagePositionPatient, dtype=np.float32)
         corner *= 0.1  # convert from mm to cm
         resolution = np.array(
-            [pixel_spacing[0], pixel_spacing[1], slice_thickness], dtype=np.float32
-        )  # dx, dy, dz
+            [pixel_spacing[1], pixel_spacing[0], slice_thickness], dtype=np.float32
+        )  # dx (column spacing), dy (row spacing), dz in mm before scaling
         resolution *= 0.1  # convert from mm to cm
+        corner -= 0.5 * resolution
         self.densities = Grid(
             num_voxels=num_voxels,
             corner=corner,
@@ -433,12 +432,13 @@ class Exam:
         """
         interpolator = RegularGridInterpolator(
             (
+                # Source volume voxel centres along z, y, x
                 self.densities.corner[2]
-                + np.arange(self.densities.num_voxels[2]) * self.densities.resolution[2],
+                + (np.arange(self.densities.num_voxels[2]) + 0.5) * self.densities.resolution[2],
                 self.densities.corner[1]
-                + np.arange(self.densities.num_voxels[1]) * self.densities.resolution[1],
+                + (np.arange(self.densities.num_voxels[1]) + 0.5) * self.densities.resolution[1],
                 self.densities.corner[0]
-                + np.arange(self.densities.num_voxels[0]) * self.densities.resolution[0],
+                + (np.arange(self.densities.num_voxels[0]) + 0.5) * self.densities.resolution[0],
             ),
             self.densities.values,
             bounds_error=False,
