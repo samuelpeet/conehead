@@ -118,5 +118,6 @@ docs/doxygen/xml/
 docs/doxygen/latex/
 
 examples/Prostate*
-
+examples/Output*
+examples/MLC*
 *.DS_Store
