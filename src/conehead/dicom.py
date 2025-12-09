@@ -150,8 +150,10 @@ def export_dose(
     # - num_voxels: (nx, ny, nz) voxel counts
     # - resolution: voxel sizes in cm (x,y,z)
     # - corner: image position (patient) of the first voxel in mm
-    rows = int(dose.num_voxels[1])  # ny
-    cols = int(dose.num_voxels[0])  # nx
+    # Internal array layout is values[z, y, x], so for DICOM export:
+    # rows (first spatial index) = ny, cols (second spatial index) = nx
+    rows = int(dose.num_voxels[1])  # ny (row index in DICOM)
+    cols = int(dose.num_voxels[0])  # nx (column index in DICOM)
     n_frames = int(dose.num_voxels[2])  # nz
     # voxel sizes in cm -> convert to mm
     dx_mm = float(dose.resolution[0]) * 10.0
@@ -163,7 +165,6 @@ def export_dose(
 
     ds.StudyInstanceUID = exam.study_instance_uid
     ds.SeriesInstanceUID = series_uid
-    ds.StudyID = exam.study_id
     ds.SeriesNumber = "1"
     ds.InstanceNumber = str(1)
     ds.FrameOfReferenceUID = exam.frame_of_reference_uid
@@ -178,10 +179,12 @@ def export_dose(
     ds.ImagePositionPatient = [ip_x * 10.0, ip_y * 10.0, ip_z * 10.0]  # cm -> mm
 
     # Orientation: (row direction vector, column direction vector)
-    # For an axis-aligned grid where +x corresponds to increasing column index
-    # and +y to increasing row index:
+    # Internal array is values[z, y, x]: rows correspond to Y, columns to X.
+    # DICOM ImageOrientationPatient = [row_x, row_y, row_z, col_x, col_y, col_z]
+    # Row direction (first index, y) = [0, 1, 0] = +Y
+    # Column direction (second index, x) = [1, 0, 0] = +X
     ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
-
+    
     # Pixel data descriptors
     ds.SamplesPerPixel = 1
     ds.PhotometricInterpretation = "MONOCHROME2"
@@ -189,7 +192,8 @@ def export_dose(
     ds.FrameIncrementPointer = (0x3004, 0x000C)
     ds.Rows = rows
     ds.Columns = cols
-    # PixelSpacing in mm: [row_spacing, column_spacing] per DICOM convention
+    # PixelSpacing in mm: [row_spacing, column_spacing] per DICOM convention.
+    # Rows correspond to Y (dy), columns to X (dx).
     ds.PixelSpacing = [dy_mm, dx_mm]
     ds.BitsAllocated = 16
     ds.BitsStored = 16
@@ -321,7 +325,6 @@ def export_dose(
 
             ds.StudyInstanceUID = exam.study_instance_uid
             ds.SeriesInstanceUID = series_uid
-            ds.StudyID = exam.study_id
             ds.SeriesNumber = "1"
             ds.InstanceNumber = str(i + 1)
             ds.FrameOfReferenceUID = exam.frame_of_reference_uid
