@@ -252,6 +252,8 @@ class StructureSet:
 
             rois.append(roi)
 
+        # Sort ROIs by descending number for consistent ordering
+        rois = sorted(rois, key=lambda r: r.roi_number, reverse=True)
         return cls(rois=rois)
 
     def get_roi_by_name(self, name: str) -> Optional[ROI]:

@@ -352,7 +352,7 @@ class Exam:
             roi_mask = roi.mask_on_grid(self.densities)
             inclusion_mask |= roi_mask
 
-        self.densities_masked.values[~inclusion_mask] = -1.0  # type: ignore
+        self.densities_masked.values[~inclusion_mask] = 0.0  # type: ignore
 
     def plot_slice(
         self, z_index: int | None = None, masked=False, ax=None, cmap: str = "gray"
@@ -413,7 +413,7 @@ class Exam:
         if created_fig:
             plt.show()
 
-    def densities_on_grid(self, grid: Grid) -> Grid:
+    def densities_on_grid(self, grid: Grid, masked: bool = True) -> Grid:
         """Resample the internal density volume onto a target :class:`Grid`.
 
         Parameters
@@ -423,6 +423,9 @@ class Exam:
             returned Grid will have the same ``num_voxels``, ``corner``
             and ``resolution`` as the provided ``grid`` but with values
             computed by trilinear interpolation of ``self.densities``.
+        masked : bool
+            If True, use the masked density volume for interpolation.
+            If False, use the unmasked density volume.
 
         Returns
         -------
@@ -430,17 +433,24 @@ class Exam:
             A new :class:`Grid` instance containing the interpolated
             density volume (dtype float32, shape ``(nz, ny, nx)``).
         """
+        if masked:
+            if not hasattr(self, "densities_masked"):
+                raise ValueError("No masked density volume available")
+            densities = self.densities_masked
+        else:
+            densities = self.densities
+
         interpolator = RegularGridInterpolator(
             (
                 # Source volume voxel centres along z, y, x
-                self.densities.corner[2]
-                + (np.arange(self.densities.num_voxels[2]) + 0.5) * self.densities.resolution[2],
-                self.densities.corner[1]
-                + (np.arange(self.densities.num_voxels[1]) + 0.5) * self.densities.resolution[1],
-                self.densities.corner[0]
-                + (np.arange(self.densities.num_voxels[0]) + 0.5) * self.densities.resolution[0],
+                densities.corner[2]
+                + (np.arange(densities.num_voxels[2]) + 0.5) * densities.resolution[2],
+                densities.corner[1]
+                + (np.arange(densities.num_voxels[1]) + 0.5) * densities.resolution[1],
+                densities.corner[0]
+                + (np.arange(densities.num_voxels[0]) + 0.5) * densities.resolution[0],
             ),
-            self.densities.values,
+            densities.values,
             bounds_error=False,
             fill_value=0.0,
         )

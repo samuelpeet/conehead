@@ -94,7 +94,7 @@ __global__ void dose(float* dose_grid,
     }
 
     // Outside external/support structures
-    if (density_grid[idx] == -1.0f) {
+    if (density_grid[idx] == 0.0f) {
         // Skip convolution for this voxel
         dose_grid[idx] = 0.0f;
         return;
