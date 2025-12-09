@@ -22,15 +22,28 @@ from conehead.calculate import calculate
 settings = toml.load("Truebeam_6FFF_M120.toml")
 
 # Load CT/Structure Set and Plan
-dicom_dir = "Prostate Wedge"
+# dicom_dir = "Prostate Wedge"
+# dicom_dir = "3DCRT 6FFF"
+dicom_dir = "Output Factors 6FFF"
+# dicom_dir = "MLC Fields 6FFF"
 exam = Exam(dicom_dir=f"{dicom_dir}", hu_lut_path="Siemens_Confidence.toml")
 plan = Plan(dicom_dir=f"{dicom_dir}")
 
 # Define grid geometry for dose calculation
+# grid = Grid(
+#     corner=np.array([-21.25, -1.25, -21.6], dtype=np.float32),
+#     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
+#     num_voxels=np.array([213, 213, 215], dtype=np.int32),
+# )
+# grid = Grid(
+#     corner=np.array([-26.95665, -23.1248, -10.2], dtype=np.float32),
+#     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
+#     num_voxels=np.array([267, 206, 138], dtype=np.int32),
+# )
 grid = Grid(
-    corner=np.array([-26.97, -23.12, -10.20], dtype=np.float32),
+    corner=np.array([-20, 0, -20], dtype=np.float32),
     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
-    num_voxels=np.array([267, 206, 138], dtype=np.int32),
+    num_voxels=np.array([200, 200, 200], dtype=np.int32),
 )
 
 
@@ -49,9 +62,9 @@ for beam in plan.beams:
         source = Source(isocenter=beam.isocenter_position)
         source.gantry = cp.gantry
         source.collimator = cp.collimator + 90.0
-        print(f"Collimator, Gantry: {source.collimator}, {source.gantry}")
-        print(f"Source position: {source.position}")
-        print(f"Isocenter: {source.isocenter}")
+        # print(f"Collimator, Gantry: {source.collimator}, {source.gantry}")
+        # print(f"Source position: {source.position}")
+        # print(f"Isocenter: {source.isocenter}")
 
         # Initalise the block and compute the fluence maps
         block = Block(control_point=cp, settings=settings)
