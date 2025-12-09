@@ -1,423 +1,280 @@
 # %%
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.ndimage import gaussian_filter
-from scipy.interpolate import RegularGridInterpolator, make_interp_spline
 import sys
 import os
+sys.path.append(os.path.join(os.getcwd(), "../build/"))
+import matplotlib.pyplot as plt
+import numpy as np
 import toml
-from importlib.resources import files
-from conehead.kernel import KernelMono
-from conehead.nist import mu_water
-from conehead.source import Source
-from conehead.phantom import SimplePhantom
+from conehead.dicom import export_dose
+from conehead.exam import Exam
+from conehead.plan import Plan
+from conehead.grid import Grid
 from conehead.block import Block
+from conehead.source import Source
+from conehead.calculate import calculate
 import pandas as pd
 from scipy.optimize import minimize
 
-sys.path.append(os.path.join(os.getcwd(), "../build/"))
-import conehead_gpu as gpu
 
-
-def run(fs, x):
-    settings = toml.load("Truebeam_6FFF_M120.toml")
-
-    source_sad = np.float32(100.0)
-    pri_s = np.float32(0.98373769)
-    pri_x = np.float32(0.14093192)
-    pri_y = np.float32(0.14093192)
-    pri_z = np.float32(0.5)
-    sec_s = np.float32(0.01626231)
-    sec_x = np.float32(25.26913868)
-    sec_y = np.float32(25.26913868)
-    sec_z = np.float32(20.0)
-    samples = np.int32(3)
-    mask_max_distance = np.float32(5.0)  # cm
-    mask_terma_threshold = np.float32(0.005)
-
-    # energies = np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)
-    # energy_weights = settings["energy_spectrum"]["weights"]
-
-    energies = np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)
-    energy_weights = np.array(settings["energy_spectrum"]["weights"], dtype=np.float32)
-    # # mu = 0.91712852
-    # # sigma = 0.88657253
-    # mu = x[0]
-    # sigma = x[1]
-    # energy_weights = 1 / (np.sqrt(2 * np.pi) * sigma * energies)
-    # energy_weights *= np.exp(-((np.log(energies) - mu) ** 2) / (2 * sigma**2))
-    # N = np.sum(energy_weights)
-    # energy_weights /= N
-    # energy_weights /= energies
-
-    oads = np.array([0.0, 40.0], dtype=np.float32)
-    off_axis_softening_fs_interp = np.array([0.0, 0.0], dtype=np.float32)
-    mu_w = mu_water(energies)
-
-    phantom = SimplePhantom()
-    # phantom.densities[:, 25:71, :] = np.float32(0.2813)  # Feature
-
-    block = Block()
-    block.set_square(np.float32(fs))
-    x_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
-    y_orig = np.linspace(-20.0, 20.0, 4000)  # 4000 points from -20 to 20
-    X_orig, Y_orig = np.meshgrid(x_orig, y_orig)
-    x_target = np.linspace(-28.0, 28.0, 560)  # 560 points from -28 to 28
-    y_target = np.linspace(-28.0, 28.0, 560)  # 560 points from -28 to 28
-    X_target, Y_target = np.meshgrid(x_target, y_target)
-    interpolator = RegularGridInterpolator(
-        (x_orig, y_orig), block.block_values, method="linear", bounds_error=False, fill_value=0
-    )
-    points_target = np.array([X_target.ravel(), Y_target.ravel()]).T
-    block_interpolated = interpolator(points_target)
-    block_interpolated_2d = block_interpolated.reshape(X_target.shape)
-    pixel_pitch_cm = 0.1  # cm
-    sigma_pix_x = settings["sources"]["pri_x"] / pixel_pitch_cm
-    sigma_pix_y = settings["sources"]["pri_y"] / pixel_pitch_cm
-    pri_fluence = gaussian_filter(
-        block_interpolated_2d, sigma=(sigma_pix_x, sigma_pix_y), mode="nearest"
-    )
-    sigma_pix_x = settings["sources"]["sec_x"] / pixel_pitch_cm
-    sigma_pix_y = settings["sources"]["sec_y"] / pixel_pitch_cm
-    sec_fluence = gaussian_filter(
-        block_interpolated_2d, sigma=(sigma_pix_x, sigma_pix_y), mode="nearest"
-    )
-    bpc_interp = make_interp_spline(
-        settings["beam_profile_correction"]["oads"],
-        settings["beam_profile_correction"]["factors"],
-        k=1,
-    )
-    x = np.arange(-28, 28, 0.1, dtype=np.float32)
-    y = np.arange(-28, 28, 0.1, dtype=np.float32)
-    X, Y = np.meshgrid(x, y)
-    r = np.sqrt(X**2 + Y**2)
-    bpc = bpc_interp(r)
-    fluence_map_pri = settings["sources"]["pri_s"] * pri_fluence * bpc
-    fluence_map_sec = settings["sources"]["sec_s"] * sec_fluence
-    fluence_map_pri = fluence_map_pri.astype(np.float32)
-    fluence_map_sec = fluence_map_sec.astype(np.float32)
-
-    oad_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
-    d_geo_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
-    d_eff_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
-    density_grid = phantom.densities
-    fluence_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
-    # fluence_map_pri = np.zeros((560, 560), dtype=np.float32) * pri_s
-    # fluence_map_pri[250:310, 250:310] = 1.0
-    # fluence_map_pri = gaussian_filter(fluence_map_pri, sigma=(2, 2), mode="nearest")
-    # fluence_map_pri = fluence_map_pri.astype(np.float32)
-    # fluence_map_sec = np.zeros((560, 560), dtype=np.float32) * sec_s
-    # fluence_map_sec[250:310, 250:310] = 1.0
-    # fluence_map_sec = gaussian_filter(fluence_map_sec, sigma=(50, 50), mode="nearest")
-    # fluence_map_sec = fluence_map_sec.astype(np.float32)
-    terma_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
-    mask_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
-    dose_grid = np.zeros(phantom.num_voxels, dtype=np.float32)
-
-    source = Source()
-    # source.gantry = np.float32(45.0)
-
-    kernels = [
-        KernelMono(files("conehead.kernels").joinpath("0.5MeV/0.5MeV.egslst")),
-        KernelMono(files("conehead.kernels").joinpath("1.0MeV/1.0MeV.egslst")),
-        KernelMono(files("conehead.kernels").joinpath("1.5MeV/1.5MeV.egslst")),
-        KernelMono(files("conehead.kernels").joinpath("2.0MeV/2.0MeV.egslst")),
-        KernelMono(files("conehead.kernels").joinpath("2.5MeV/2.5MeV.egslst")),
-        KernelMono(files("conehead.kernels").joinpath("3.0MeV/3.0MeV.egslst")),
-        KernelMono(files("conehead.kernels").joinpath("3.5MeV/3.5MeV.egslst")),
-        KernelMono(files("conehead.kernels").joinpath("4.0MeV/4.0MeV.egslst")),
-        KernelMono(files("conehead.kernels").joinpath("4.5MeV/4.5MeV.egslst")),
-        KernelMono(files("conehead.kernels").joinpath("5.0MeV/5.0MeV.egslst")),
-        KernelMono(files("conehead.kernels").joinpath("5.5MeV/5.5MeV.egslst")),
-        KernelMono(files("conehead.kernels").joinpath("6.0MeV/6.0MeV.egslst")),
-    ]
-    kernel = np.zeros_like(kernels[0].kernel, dtype=np.float32)
-    for i in range(len(settings["energy_spectrum"]["energies"])):
-        kernel += (
-            kernels[i].kernel
-            * settings["energy_spectrum"]["weights"][i]
-            * settings["energy_spectrum"]["energies"][i]
-        )
-    kernel = kernel / kernel.sum()  # normalise
-    kernel_radii = kernels[0].radii_centres
-    kernel_phis = kernels[0].angles
-    kernel_phis_c = kernels[0].angles_centres
-    kernel_thetas = np.linspace(0, 360 - (360 / 16), 16, dtype=np.float32)  # 16 thetas
-    kernel = kernel / len(kernel_thetas)  # account for theta sampling
-    kernel_omegas = (kernels[0].omegas / len(kernel_thetas)).astype(np.float32)
-
-    gpu.oad(
-        oad_grid=oad_grid,
-        num_voxels=phantom.num_voxels,
-        corner=phantom.corner,
-        resolution=phantom.resolution,
-        source_position=source.position,
-        source_v_x=source.v_x,
-        source_v_y=source.v_y,
-        source_v_z=source.v_z,
-    )
-    gpu.d_geo(
-        d_geo_grid=d_geo_grid,
-        num_voxels=phantom.num_voxels,
-        corner=phantom.corner,
-        resolution=phantom.resolution,
-        source_position=source.position,
-    )
-    gpu.d_eff(
-        d_eff_grid=d_eff_grid,
-        num_voxels=phantom.num_voxels,
-        corner=phantom.corner,
-        resolution=phantom.resolution,
-        density_grid=density_grid,
-        source_position=source.position,
-    )
-    gpu.fluence(
-        fluence_grid=fluence_grid,
-        fluence_map_pri=fluence_map_pri,
-        fluence_map_sec=fluence_map_sec,
-        num_voxels=phantom.num_voxels,
-        corner=phantom.corner,
-        resolution=phantom.resolution,
-        d_geo_grid=d_geo_grid,
-        source_position=source.position,
-        source_v_x=source.v_x,
-        source_v_y=source.v_y,
-        source_v_z=source.v_z,
-        source_sad=source_sad,
-        pri_s=pri_s,
-        pri_x=pri_x,
-        pri_y=pri_y,
-        pri_z=pri_z,
-        sec_s=sec_s,
-        sec_x=sec_x,
-        sec_y=sec_y,
-        sec_z=sec_z,
-        samples=samples,
-    )
-    gpu.terma(
-        terma_grid=terma_grid,
-        fluence_grid=fluence_grid,
-        d_geo_grid=d_geo_grid,
-        d_eff_grid=d_eff_grid,
-        num_voxels=phantom.num_voxels,
-        num_energies=np.int32(len(energies)),
-        energies=energies,
-        energy_weights=energy_weights,
-        mu_w=mu_w,
-        source_sad=source_sad,
-        oad_grid=oad_grid,
-        off_axis_softening_fs_interp=off_axis_softening_fs_interp,
-        off_axis_softening_dx=np.float32(40.0),
-    )
-    gpu.mask(
-        mask_grid=mask_grid,
-        terma_grid=terma_grid,
-        num_voxels=phantom.num_voxels,
-        resolution=phantom.resolution,
-        max_distance_cm=mask_max_distance,
-        terma_threshold=mask_terma_threshold * terma_grid.max(),
-    )
-    gpu.dose(
-        dose_grid=dose_grid,
-        resolution=phantom.resolution,
-        num_voxels=phantom.num_voxels,
-        corner=phantom.corner,
-        density_grid=density_grid,
-        d_geo_grid=d_geo_grid,
-        terma_grid=terma_grid,
-        mask_grid=mask_grid,
-        kernel_thetas=kernel_thetas,
-        kernel_phis=kernel_phis_c,
-        kernel_omegas=kernel_omegas,
-        kernel=kernel,
-        source_sad=source_sad,
-        source_position=source.position,
-        source_v_x=source.v_x,
-        source_v_y=source.v_y,
-        source_v_z=source.v_z,
-        n_depth_bins=np.int32(1192),
-        kernel_depth_res_cm=np.float32(0.05),
-        max_kernel_depth_cm=np.float32(59.6),
-        ds_cm=np.float32(0.05),
-    )
-
-    x_gap = np.abs(block.x2_jaw_pos - block.x1_jaw_pos)
-    y_gap = np.abs(block.y2_jaw_pos - block.y1_jaw_pos)
-
-    field_measure = 2 * x_gap * y_gap / (x_gap + y_gap)
-    ofc = np.interp(
-        field_measure,
-        settings["output_factor_correction"]["field_sizes"],
-        settings["output_factor_correction"]["factors"],
-    ).astype(np.float32)
-    N = np.float32(settings["calculation"]["normalisation"])
-
-    MU = np.float32(100.0)
-    dose_grid = dose_grid * N * MU * ofc
-
-    # print("Field size: " + str(fs) + "x" + str(fs) + " cm, OFC: " + str(ofc))
-    # print("dose_grid: " + str(0.5 * dose_grid[100, 50, 100] + 0.5 * dose_grid[100, 49, 100]))
-
-    return dose_grid
-
-
-# %%
-file_path = "6FFF Beam Data.xlsx"
-df = pd.read_excel(file_path, sheet_name="Open Field Depth Dose")
-# fig, ax = plt.subplots(1, 1, figsize=(12, 9))
-xs = np.linspace(0, 40, 201) + 0.1
-
-
-def optimise_me(x):
+def import_gold_beam_data():
+    # Read gold beam PDDs and crossline profiles. Profiles are scaled by the PDD at the profile depth.
+    gold = {}
+    df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Profiles at 1.5cm")
     fss = [3, 4, 6, 8, 10, 20, 30, 40]
-    dgs = []
-    for fs in fss:
-        # print("Optimising for field size: " + str(fs) + " x " + str(fs))
-        dose_grid = run(fs, x)
-        # ax.plot(xs, dose_grid[100, :, 100], "x")
-        dgs.append(dose_grid)
+    ofs = [0.838663, 0.874284, 0.92817, 0.969307, 1.0, 1.083025, 1.113093, 1.132091]
+    for i, v in enumerate(fss):
+        gold[v] = {}
+        gold[v]["of"] = ofs[i]
+        df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Depth Dose")
+        gold[v]["pdd"] = [df.iloc[5:, 0].to_numpy().astype(np.float32), df.iloc[5:, i + 1].to_numpy().astype(np.float32) / 100]
+        df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Profiles at 1.5cm")
+        gold[v]["prof_15"] = [df.iloc[7:, 0].to_numpy().astype(np.float32), df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][15]]
+        df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Profiles at 5cm")
+        gold[v]["prof_50"] = [df.iloc[7:, 0].to_numpy().astype(np.float32), df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][50]]    
+        df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Profiles at 10cm")
+        gold[v]["prof_100"] = [df.iloc[7:, 0].to_numpy().astype(np.float32), df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][100]]
+        df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Profiles at 20cm")
+        gold[v]["prof_200"] = [df.iloc[7:, 0].to_numpy().astype(np.float32), df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][200]]
+        df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Profiles at 30cm")
+        gold[v]["prof_300"] = [df.iloc[7:, 0].to_numpy().astype(np.float32), df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][300]]
+    df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Diagonal Profiles")
+    gold[40]["diag_15"] = [df.iloc[6:, 0].to_numpy().astype(np.float32), df.iloc[6:, 1].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][15]]
+    gold[40]["diag_15"][0] = gold[40]["diag_15"][0][~np.isnan(gold[40]["diag_15"][1])]
+    gold[40]["diag_15"][1] = gold[40]["diag_15"][1][~np.isnan(gold[40]["diag_15"][1])]
+    gold[40]["diag_50"] = [df.iloc[6:, 0].to_numpy().astype(np.float32), df.iloc[6:, 2].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][50]]
+    gold[40]["diag_50"][0] = gold[40]["diag_50"][0][~np.isnan(gold[40]["diag_50"][1])]
+    gold[40]["diag_50"][1] = gold[40]["diag_50"][1][~np.isnan(gold[40]["diag_50"][1])]
+    gold[40]["diag_100"] = [df.iloc[6:, 0].to_numpy().astype(np.float32), df.iloc[6:, 3].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][100]]
+    gold[40]["diag_100"][0] = gold[40]["diag_100"][0][~np.isnan(gold[40]["diag_100"][1])]
+    gold[40]["diag_100"][1] = gold[40]["diag_100"][1][~np.isnan(gold[40]["diag_100"][1])]
+    gold[40]["diag_200"] = [df.iloc[6:, 0].to_numpy().astype(np.float32), df.iloc[6:, 4].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][200]]
+    gold[40]["diag_200"][0] = gold[40]["diag_200"][0][~np.isnan(gold[40]["diag_200"][1])]
+    gold[40]["diag_200"][1] = gold[40]["diag_200"][1][~np.isnan(gold[40]["diag_200"][1])]
+    gold[40]["diag_300"] = [df.iloc[6:, 0].to_numpy().astype(np.float32), df.iloc[6:, 5].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][300]]
+    gold[40]["diag_300"][0] = gold[40]["diag_300"][0][~np.isnan(gold[40]["diag_300"][1])]
+    gold[40]["diag_300"][1] = gold[40]["diag_300"][1][~np.isnan(gold[40]["diag_300"][1])]
+    return gold
 
-    xs = np.linspace(0, 40, 201) + 0.1
-    ofs = [0.8432, 0.8753, 0.9285, 0.9704, 1.000, 1.0837, 1.1190, 1.1349]
-    diff = 0.0
-    for i in range(len(dgs)):
-        calc = dgs[i][100, :, 100]
-        gold = np.interp(
+
+def run(fs, grid, exam, settings):
+    source = Source()
+    source.gantry = 0.0
+    source.collimator = 90.0
+    block = Block(settings=settings)
+    block.set_square(fs)
+    fluence_map_pri, fluence_map_sec = block.get_fluence_maps()
+    dose = Grid(corner=grid.corner, resolution=grid.resolution, num_voxels=grid.num_voxels)
+    dose.values += calculate(  # type: ignore
+        grid,
+        source,
+        fluence_map_pri,
+        fluence_map_sec,
+        exam,
+        [-fs / 2, fs / 2],
+        [-fs / 2, fs / 2],
+        settings,
+    )
+    return dose
+
+
+def calculate_doses(fss, exam, settings):
+    # Calculate conehead doses for a range of field sizes
+    grid = Grid(
+        corner=np.array([-30.1, 0, -30.1], dtype=np.float32),
+        resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
+        num_voxels=np.array([301, 201, 301], dtype=np.int32),
+    )
+    calc = {}
+    for fs in fss:
+        print(f"Running field: {fs}")
+        calc[fs] = {}
+        calc[fs]["dose"] = run(fs, grid, exam, settings) 
+        calc[fs]["dose"].values *= 100 # Multiplying by 100 for 100 MU (thus 1 Gy at dmax for 10x10)
+        ds = [grid.corner[1] + grid.resolution[1] / 2 + x * grid.resolution[1] for x in range(grid.num_voxels[1])]
+        calc[fs]["pdd"] = [ds, calc[fs]["dose"].values[grid.num_voxels[1] // 2, :, grid.num_voxels[1] // 2]]
+        xs = [grid.corner[0] + grid.resolution[0] / 2 + x * grid.resolution[0] for x in range(grid.num_voxels[0])]
+        calc[fs]["prof_15"] = [xs, calc[fs]["dose"].values[grid.num_voxels[2] // 2, 7, :]]
+        calc[fs]["prof_50"] = [
             xs,
-            df.iloc[6:, 0].to_numpy().astype(np.float32),
-            (df.iloc[6:, i + 1] / df.iloc[105, i + 1] * ofs[i] * 0.635)
-            .to_numpy()
-            .astype(np.float32),
-        )
-        diff += np.sum(np.abs(calc[6:149] - gold[6:149])) ** 2
+            0.5 * calc[fs]["dose"].values[grid.num_voxels[2] // 2, 24, :] + 
+            0.5 * calc[fs]["dose"].values[grid.num_voxels[2] // 2, 25, :]
+        ]
+        calc[fs]["prof_100"] = [
+            xs,
+            0.5 * calc[fs]["dose"].values[grid.num_voxels[2] // 2, 49, :] + 
+            0.5 * calc[fs]["dose"].values[grid.num_voxels[2] // 2, 50, :]
+        ]
+        calc[fs]["prof_200"] = [
+            xs,
+            0.5 * calc[fs]["dose"].values[grid.num_voxels[2] // 2, 99, :] + 
+            0.5 * calc[fs]["dose"].values[grid.num_voxels[2] // 2, 100, :]
+        ]
+        calc[fs]["prof_300"] = [
+            xs,
+            0.5 * calc[fs]["dose"].values[grid.num_voxels[2] // 2, 149, :] + 
+            0.5 * calc[fs]["dose"].values[grid.num_voxels[2] // 2, 150, :]
+        ]
+        if fs == 40:
+            xs = np.array(xs)
+            rs = np.sqrt(xs * xs + xs * xs)
+            rs[xs < 1] *= -1
+            calc[fs]["diag_15"] = [rs, np.diag(calc[fs]["dose"].values[:, 7, :])]
+            calc[fs]["diag_50"] = [
+                rs,
+                0.5 * np.diag(calc[fs]["dose"].values[:, 24, :]) +
+                0.5 * np.diag(calc[fs]["dose"].values[:, 25, :])
+            ]
+            calc[fs]["diag_100"] = [
+                rs,
+                0.5 * np.diag(calc[fs]["dose"].values[:, 49, :]) +
+                0.5 * np.diag(calc[fs]["dose"].values[:, 50, :])
+            ]
+            calc[fs]["diag_200"] = [
+                rs,
+                0.5 * np.diag(calc[fs]["dose"].values[:, 99, :]) +
+                0.5 * np.diag(calc[fs]["dose"].values[:, 100, :])
+            ]
+            calc[fs]["diag_300"] = [
+                rs,
+                0.5 * np.diag(calc[fs]["dose"].values[:, 149, :]) +
+                0.5 * np.diag(calc[fs]["dose"].values[:, 150, :])
+            ]
+    return calc
+
+
+def difference_in_pdds(calc, gold):
+    diff = 0.0
+    for fs in calc.keys():
+        calc_pdd_interp = np.interp(gold[fs]["pdd"][0], calc[fs]["pdd"][0], calc[fs]["pdd"][1] / calc[fs]["pdd"][1].max())
+        gold_pdd = gold[fs]["pdd"][1]
+
+        # Clip off approximate build-up region
+        calc_pdd_interp = calc_pdd_interp[10:]
+        gold_pdd = gold_pdd[10:]
+
+        diff += np.sum(np.abs(calc_pdd_interp - gold_pdd)**2)
+    return diff
+
+
+def optimise_pdd(x, exam, gold):
+    # Update settings with new energy spectrum
+    settings = toml.load("Truebeam_6FFF_M120.toml")
+    energies = np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)
+    energy_weights = np.array([x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], 0.0, x[8], 0.0, x[9]], dtype=np.float32)
+    N = np.sum(energy_weights)
+    energy_weights /= N
+    energy_weights /= energies
+    settings["energy_spectrum"]["weights"] = energy_weights.tolist()
+
+    # Calc doses
+    fss = [3, 10, 40]
+    calc = calculate_doses(fss, exam, settings)
+    diff = difference_in_pdds(calc, gold)
     print(f"params: {x}, Diff: {diff}")
     return diff
 
 
 # %%
-def constraint_func(x):
-    return x[0] - x[1] - 0.01
-
-
-# Current best: [0.91712852, 0.88657253]
-x0 = [0.90664624, 0.87404703]
-bounds = [(0.5, 1.8), (0.5, 1.8)]
-# constraints = {
-#     "type": "ineq",
-#     "fun": constraint_func,
-# }
-
-
-result = minimize(optimise_me, x0, method="Nelder-Mead", bounds=bounds, options={"disp": True})
-
-# # Print the optimization result
-# print(f"Optimization Result: {result}")
-
+# Optimising energy spectrum
+gold = import_gold_beam_data()
+exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
+x0 = [0.13077393, 0.08785954, 0.0294463, 0.04815249, 0.03111974, 0.43969824, 0.03215145, 0.0169554, 0.03014422, 0.022631]
+bounds = [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
+          (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
+          (0.0, 1.0), (0.0, 1.0)]
+result = minimize(optimise_pdd, x0, args=(exam, gold), method="Nelder-Mead", bounds=bounds)
 
 # %%
-fig, ax = plt.subplots(1, 1, figsize=(12, 9))
-fss = [3, 4, 6, 8, 10, 20, 30, 40]
-# fss = [3, 10, 40]
-ofs = [0.8432, 0.8753, 0.9285, 0.9704, 1.000, 1.0837, 1.1190, 1.1349]
-dgs = []
+# Plot PDDs
+# x = [0.11815628, 0.07121678, 0.14556541, 0.09402617, 0.10339564, 0.09395615, 0.07655023, 0.11007001, 0.0512248, 0.0117276]
+x = [0.13077393, 0.08785954, 0.0294463, 0.04815249, 0.03111974, 0.43969824, 0.03215145, 0.0169554, 0.03014422, 0.022631]
+settings = toml.load("Truebeam_6FFF_M120.toml")
+energies = np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)
+energy_weights = np.array([x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], 0.0, x[8], 0.0, x[9]], dtype=np.float32)
+N = np.sum(energy_weights)
+energy_weights /= N
+energy_weights /= energies
+settings["energy_spectrum"]["weights"] = energy_weights.tolist()
+fss = [3, 10, 40]
+calc = calculate_doses(fss, exam, settings)
+fig, ax = plt.subplots(1, 1, figsize=(16, 9))
 for fs in fss:
-    print("Optimising for field size: " + str(fs) + " x " + str(fs))
-    dose_grid = run(fs, [0.91712852, 0.88657253])
-    ax.plot(xs, dose_grid[100, :, 100], "x")
-    dgs.append(dose_grid)
+    ax.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1], label="Measured PDD")
+    ax.plot(calc[fs]["pdd"][0], calc[fs]["pdd"][1] / calc[fs]["pdd"][1].max(), '.', label="Conehead PDD")
+    ax.set_xlabel("Depth (cm)")
+    ax.set_ylabel("Relative Dose")
+    ax.legend()
 
-# ax.plot(df.iloc[6:, 0], 0.01 * df.iloc[6:, 1], label="3x3")
-# ax.plot(df.iloc[6:, 0], 0.01 * df.iloc[6:, 2], label="4x4")
-# ax.plot(df.iloc[6:, 0], 0.01 * df.iloc[6:, 3], label="6x6")
-# ax.plot(df.iloc[6:, 0], 0.01 * df.iloc[6:, 4], label="8x8")
-# ax.plot(df.iloc[6:, 0], 0.01 * df.iloc[6:, 5], label="10x10")
-# ax.plot(df.iloc[6:, 0], 0.01 * df.iloc[6:, 6], label="20x20")
-# ax.plot(df.iloc[6:, 0], 0.01 * df.iloc[6:, 7], label="30x30")
-# ax.plot(df.iloc[6:, 0], 0.01 * df.iloc[6:, 8], label="40x40")
-ax.plot(df.iloc[6:, 0], df.iloc[6:, 1] / df.iloc[105, 1] * 0.8432 * 0.635, label="3x3")
-ax.plot(df.iloc[6:, 0], df.iloc[6:, 2] / df.iloc[105, 2] * 0.8753 * 0.635, label="4x4")
-ax.plot(df.iloc[6:, 0], df.iloc[6:, 3] / df.iloc[105, 3] * 0.9285 * 0.635, label="6x6")
-ax.plot(df.iloc[6:, 0], df.iloc[6:, 4] / df.iloc[105, 4] * 0.9704 * 0.635, label="8x8")
-ax.plot(df.iloc[6:, 0], df.iloc[6:, 5] / df.iloc[105, 5] * 1.0000 * 0.635, label="10x10")
-ax.plot(df.iloc[6:, 0], df.iloc[6:, 6] / df.iloc[105, 6] * 1.0837 * 0.635, label="20x20")
-ax.plot(df.iloc[6:, 0], df.iloc[6:, 7] / df.iloc[105, 7] * 1.1190 * 0.635, label="30x30")
-ax.plot(df.iloc[6:, 0], df.iloc[6:, 8] / df.iloc[105, 8] * 1.1349 * 0.635, label="40x40")
-ax.set_xlim([0, 30])
-ax.legend()
+# %%
+def calculate_normalisation():
+    exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
+    settings = toml.load("Truebeam_6FFF_M120.toml")
+    settings["calculation"]["normalisation"] = np.float32(1.0)
+    calc = calculate_doses([10], exam, settings)
+    d_max = np.argmax(calc[10]["pdd"][1])
+    calc_dose_at_10cm = calc[10]["pdd"][1][d_max]
+    normalisation = 1 / calc_dose_at_10cm
+    return normalisation
+print(calculate_normalisation())
 
 
 # %%
-# fmt: off
-class Curve:
-    def __init__(self, x, y, type, size, of, depth=0.0):
-        self.x = x
-        self.y = y
-        self.type = type
-        self.size = size
-        self.depth = depth
-        self.of = of
+def calculate_ofcs(fss, exam, settings, gold):
+    # Set OFCs to 1
+    fss = settings["output_factor_correction"]["field_sizes"]
+    settings["output_factor_correction"]["factors"] = np.ones_like(fss, dtype=np.float32)
+    calc = calculate_doses(fss, exam, settings)
+    for fs in fss:
+        gold_dose_at_10cm = gold[fs]["of"] * 0.635  # 0.635 is PDD(10) for 10 x 10 field
+        calc_dose_at_10cm = 0.5 * calc[fs]["pdd"][1][49] + 0.5 * calc[fs]["pdd"][1][50]
+        ofc = gold_dose_at_10cm / calc_dose_at_10cm
+        calc[fs]["ofc"] = ofc
+    return calc
 
-df = pd.read_excel(file_path, sheet_name="Open Field Depth Dose")
-measured_03x03_pdd = Curve(x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 1]), type="depth", size=3, of=0.8432) 
-measured_04x04_pdd = Curve(x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 2]), type="depth", size=4, of=0.8753) 
-measured_06x06_pdd = Curve(x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 3]), type="depth", size=6, of=0.9285) 
-measured_08x08_pdd = Curve(x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 4]), type="depth", size=8, of=0.9704) 
-measured_10x10_pdd = Curve(x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 5]), type="depth", size=10, of=1.000) 
-measured_20x20_pdd = Curve(x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 6]), type="depth", size=20, of=1.0837)
-measured_30x30_pdd = Curve(x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 7]), type="depth", size=30, of=1.1190)
-measured_40x40_pdd = Curve(x=np.array(df.iloc[6:, 0]), y=np.array(df.iloc[6:, 8]), type="depth", size=40, of=1.1349)
-
-df = pd.read_excel(file_path, sheet_name="Open Field Profiles at 1.5cm")
-measured_03x03_015 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 1]) * 0.998, type="profile", size=3, of=0.8432, depth=1.5)
-measured_04x04_015 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 2]) * 0.998, type="profile", size=4, of=0.8753, depth=1.5)
-measured_06x06_015 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 3]) * 0.999, type="profile", size=6, of=0.9285, depth=1.5)
-measured_08x08_015 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 4]) * 0.999, type="profile", size=8, of=0.9704, depth=1.5)
-measured_10x10_015 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 5]) * 0.999, type="profile", size=10, of=1.000, depth=1.5)
-measured_20x20_015 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 6]) * 0.999, type="profile", size=20, of=1.0837, depth=1.5)
-measured_30x30_015 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 7]) * 0.997, type="profile", size=30, of=1.1190, depth=1.5)
-measured_40x40_015 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 8]) * 0.997, type="profile", size=40, of=1.1349, depth=1.5)
-
-df = pd.read_excel(file_path, sheet_name="Open Field Profiles at 5cm")
-measured_03x03_050 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 1]) * 0.804, type="profile", size=3, of=0.8432, depth=5.0)
-measured_04x04_050 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 2]) * 0.815, type="profile", size=4, of=0.8753, depth=5.0)
-measured_06x06_050 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 3]) * 0.830, type="profile", size=6, of=0.9285, depth=5.0)
-measured_08x08_050 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 4]) * 0.841, type="profile", size=8, of=0.9704, depth=5.0)
-measured_10x10_050 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 5]) * 0.846, type="profile", size=10, of=1.000, depth=5.0)
-measured_20x20_050 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 6]) * 0.859, type="profile", size=20, of=1.0837, depth=5.0)
-measured_30x30_050 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 7]) * 0.864, type="profile", size=30, of=1.1190, depth=5.0)
-measured_40x40_050 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 8]) * 0.865, type="profile", size=40, of=1.1349, depth=5.0)
-
-df = pd.read_excel(file_path, sheet_name="Open Field Profiles at 10cm")
-measured_03x03_100 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 1]) * 0.570, type="profile", size=3, of=0.8432, depth=10.0)
-measured_04x04_100 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 2]) * 0.584, type="profile", size=4, of=0.8753, depth=10.0)
-measured_06x06_100 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 3]) * 0.605, type="profile", size=6, of=0.9285, depth=10.0)
-measured_08x08_100 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 4]) * 0.623, type="profile", size=8, of=0.9704, depth=10.0)
-measured_10x10_100 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 5]) * 0.635, type="profile", size=10, of=1.000, depth=10.0)
-measured_20x20_100 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 6]) * 0.665, type="profile", size=20, of=1.0837, depth=10.0)
-measured_30x30_100 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 7]) * 0.677, type="profile", size=30, of=1.1190, depth=10.0)
-measured_40x40_100 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 8]) * 0.682, type="profile", size=40, of=1.1349, depth=10.0)
-
-df = pd.read_excel(file_path, sheet_name="Open Field Profiles at 20cm")
-measured_03x03_200 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 1]) * 0.292, type="profile", size=3, of=0.8432, depth=20.0)
-measured_04x04_200 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 2]) * 0.301, type="profile", size=4, of=0.8753, depth=20.0)
-measured_06x06_200 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 3]) * 0.319, type="profile", size=6, of=0.9285, depth=20.0)
-measured_08x08_200 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 4]) * 0.335, type="profile", size=8, of=0.9704, depth=20.0)
-measured_10x10_200 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 5]) * 0.347, type="profile", size=10, of=1.000, depth=20.0)
-measured_20x20_200 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 6]) * 0.384, type="profile", size=20, of=1.0837, depth=20.0)
-measured_30x30_200 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 7]) * 0.400, type="profile", size=30, of=1.1190, depth=20.0)
-measured_40x40_200 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 8]) * 0.406, type="profile", size=40, of=1.1349, depth=20.0)
-
-df = pd.read_excel(file_path, sheet_name="Open Field Profiles at 30cm")
-measured_03x03_300 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 1]) * 0.156, type="profile", size=3, of=0.8432, depth=30.0)
-measured_04x04_300 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 2]) * 0.162, type="profile", size=4, of=0.8753, depth=30.0)
-measured_06x06_300 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 3]) * 0.173, type="profile", size=6, of=0.9285, depth=30.0)
-measured_08x08_300 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 4]) * 0.184, type="profile", size=8, of=0.9704, depth=30.0)
-measured_10x10_300 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 5]) * 0.192, type="profile", size=10, of=1.000, depth=30.0)
-measured_20x20_300 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 6]) * 0.221, type="profile", size=20, of=1.0837, depth=30.0)
-measured_30x30_300 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 7]) * 0.235, type="profile", size=30, of=1.1190, depth=30.0)
-measured_40x40_300 = Curve(x=np.array(df.iloc[8:, 0]), y=np.array(df.iloc[8:, 8]) * 0.241, type="profile", size=40, of=1.1349, depth=30.0)
+gold = import_gold_beam_data()
+exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
+settings = toml.load("Truebeam_6FFF_M120.toml")
+fss = [3, 4, 6, 8, 10, 20, 30, 40]
+calc = calculate_ofcs(fss, exam, settings, gold)
+for fs in calc.keys():
+    calc[fs]["ofc"] /= calc[10]["ofc"] # Normalise to 10 x 10
+print("Output Factor Corrections:")
+print([calc[fs]["ofc"] for fs in fss])
 
 
+# %%
+def difference_in_diag(calc, gold):
+    diff = 0.0
+    fs = 40
+    key = "diag_15"
+    calc_diag_interp = np.interp(gold[fs][key][0], calc[fs][key][0], calc[fs][key][1] / calc[fs][key][1].max())
+    gold_diag = gold[fs][key][1]
 
-# fmt: on
+    # Clip off tails
+    calc_diag_interp = calc_diag_interp[50:-50]
+    gold_diag = gold_diag[50:-50]
+
+    diff += np.sum(np.abs(calc_diag_interp - gold_diag)**2)
+    return diff
+
+def optimise_bpc(x, exam, gold):
+    # Update settings with new beam profile correction
+    settings = toml.load("Truebeam_6FFF_M120.toml")
+    settings["beam_profile_correction"]["factors"] = np.insert(x, 0, 1.00)
+    calc = calculate_doses([40], exam, settings)
+    diff = difference_in_diag(calc, gold) * 100
+    print(f"Params: {x}")
+    print(f"Diff: {diff}")
+    return diff
+
+# Optimising beam profile correction
+gold = import_gold_beam_data()
+exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
+x0 = [0.996, 0.982, 0.961, 0.936, 0.881, 0.822, 0.765, 0.720, 0.677, 0.631, 0.596, 0.562, 0.533, 0.51, 0.5, 0.388, 0.069, 0.043, 0.03, 0.02, 0.02, 0.02]
+bounds = [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
+          (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
+          (0.0, 1.0), (0.0, 1.0)]
+result = minimize(optimise_bpc, x0, args=(exam, gold), method="Nelder-Mead", bounds=bounds)
+
+
 # %%

@@ -120,4 +120,13 @@ docs/doxygen/latex/
 examples/Prostate*
 examples/Output*
 examples/MLC*
+examples/3DCRT*
+examples/03*
+examples/04*
+examples/06*
+examples/08*
+examples/10*
+examples/20*
+examples/30*
+examples/40*
 *.DS_Store
