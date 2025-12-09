@@ -74,15 +74,15 @@ def calculate(
         source_v_z=source.v_z,
         source_isocenter=source.isocenter,
     )
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    axes[0].imshow(oad_grid[:, :, 138], aspect='equal', cmap='jet')
-    axes[0].set_title("X slice")
-    axes[1].imshow(oad_grid[:, 103, :], aspect='equal', cmap='jet')
-    axes[1].set_title("Y slice")
-    axes[2].imshow(oad_grid[69, :, :], aspect='equal', cmap='jet')
-    axes[2].set_title("Z slice")
-    plt.tight_layout()
-    plt.show()
+    # fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    # axes[0].imshow(oad_grid[:, :, 138], aspect='equal', cmap='jet')
+    # axes[0].set_title("X slice")
+    # axes[1].imshow(oad_grid[:, 103, :], aspect='equal', cmap='jet')
+    # axes[1].set_title("Y slice")
+    # axes[2].imshow(oad_grid[69, :, :], aspect='equal', cmap='jet')
+    # axes[2].set_title("Z slice")
+    # plt.tight_layout()
+    # plt.show()
     gpu.d_geo(
         d_geo_grid=d_geo_grid,
         num_voxels=grid.num_voxels,
@@ -98,7 +98,6 @@ def calculate(
         density_grid=density_grid,
         source_position=source.position,
     )
-    print(f"Source collimator angle: {source.collimator}")
     gpu.fluence(
         fluence_grid=fluence_grid,
         fluence_map_pri=fluence_map_pri,
@@ -117,16 +116,67 @@ def calculate(
         sec_z=np.float32(settings["sources"]["sec_z"]),
         samples=np.int32(settings["calculation"]["fluence_resampling"]),
     )
-    print(f"Source collimator angle: {source.collimator}")
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    axes[0].imshow(fluence_grid[:, :, 138], aspect='equal', cmap='plasma')
-    axes[0].set_title("X slice")
-    axes[1].imshow(fluence_grid[:, 103, :], aspect='equal', cmap='plasma')
-    axes[1].set_title("Y slice")
-    axes[2].imshow(fluence_grid[69, :, :], aspect='equal', cmap='plasma')
-    axes[2].set_title("Z slice")
-    plt.tight_layout()
-    plt.show()
+
+
+    # data = fluence_map_pri
+    # rows, cols = data.shape
+    # fig, ax = plt.subplots(figsize=(12,12))
+    # # Define extent to align grid with pixel edges
+    # extent = [0, cols, 0, rows]
+    # ax.imshow(data, interpolation='none', origin='lower', cmap='rainbow')
+    # ax.set_xticks(np.arange(0, cols, 1))
+    # ax.set_yticks(np.arange(0, rows, 1))
+    # # ax.grid(which='minor', color='black', linestyle='-', linewidth=0.5)
+    # ax.grid(which='major', color='black', linestyle='-', linewidth=0.5)
+    # # ax.tick_params(which='minor', size=0)
+    # ax.set_xlim([260, 300])
+    # ax.set_ylim([260, 300])
+    # plt.show()
+
+    # print(f"Source collimator angle: {source.collimator}")
+    # fig, axes = plt.subplots(1, 3, figsize=(45, 15))
+    # axes[0].imshow(fluence_grid[:, :, 100], aspect='equal', cmap='plasma')
+    # axes[0].set_title("X slice")
+    # data = fluence_grid[:, 0, :]
+    # rows, cols = data.shape
+    # axes[1].imshow(data, aspect='equal', cmap='rainbow')
+    # axes[1].set_title("Y slice")
+    # axes[1].set_xticks(np.arange(0, cols, 1))
+    # axes[1].set_yticks(np.arange(0, rows, 1))
+    # axes[1].grid(which='major', color='black', linestyle='-', linewidth=0.5)
+    # axes[1].set_xlim([80, 120])
+    # axes[1].set_ylim([80, 120])
+    # axes[2].imshow(fluence_grid[100, :, :], aspect='equal', cmap='plasma')
+    # axes[2].set_title("Z slice")
+    # plt.tight_layout()
+    # plt.show()
+
+
+
+    # data = fluence_grid[:, :, 100]
+    # rows, cols = data.shape
+    # fig, ax = plt.subplots(figsize=(12,12))
+
+    # # Define extent to align grid with pixel edges
+    # extent = [0, cols, 0, rows]
+
+    # ax.imshow(data, interpolation='none', origin='lower', cmap='rainbow')
+    # ax.set_xticks(np.arange(0, cols, 1))
+    # ax.set_yticks(np.arange(0, rows, 1))
+    # # ax.grid(which='minor', color='black', linestyle='-', linewidth=0.5)
+    # ax.grid(which='major', color='black', linestyle='-', linewidth=0.5)
+
+    # # ax.tick_params(which='minor', size=0)
+    # ax.set_xlim([0, 30])
+    # ax.set_ylim([80, 120])
+    # plt.show()
+
+
+
+
+
+
+
 
     gpu.terma(
         terma_grid=terma_grid,
