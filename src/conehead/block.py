@@ -229,6 +229,8 @@ class Block:
         self.y1_jaw_pos = -length / 2
         self.y2_jaw_pos = length / 2
 
+        self.wedge_angle = None
+
     def _set_from_control_point(self, control_point: ControlPoint, settings: dict):
         """Initialise the Block from an RTPLAN-derived control point.
 
@@ -261,6 +263,13 @@ class Block:
         )  # cm to tenths of mm
         mlc_ends_a = mlc_ends[: int(len(mlc_ends) / 2)] - mlc_offset
         mlc_ends_b = mlc_ends[int(len(mlc_ends) / 2) :] + mlc_offset
+        # We need to clip the leaf end positions to be within the MLC
+        # boundaries to avoid leaves extending beyond the defined MLC
+        # region.
+        # min_clip_position = settings["collimators"]["mlc"]["mlc_min_position"] * 100 + 2000
+        # max_clip_position = settings["collimators"]["mlc"]["mlc_max_position"] * 100 + 2000
+        mlc_ends_a = np.clip(mlc_ends_a, -2000, 2000)
+        mlc_ends_b = np.clip(mlc_ends_b, -2000, 2000)
 
         # Create leaves
         leaves = []
@@ -306,9 +315,10 @@ class Block:
                 x2 = 3999
             y1 = leaf.c_min
             y2 = leaf.c_max
-            self.values[x1:x2, y1:y2] *= np.fliplr(
-                leaf.area[x1_offset : (leaf.r_max - leaf.r_min - x2_offset), :]
-            )
+            # print(leaf.r_min, leaf.r_max, leaf.c_min, leaf.c_max)
+            leaf_area = leaf.area[x1_offset : (leaf.r_max - leaf.r_min - x2_offset), :]
+            # print(x1, x2, y1, y2, leaf_area.shape, x1_offset, x2_offset)
+            self.values[x1:x2, y1:y2] *= np.fliplr(leaf_area)
 
         # Include jaws in block plane
         x_trans = settings["collimators"]["x_jaw_trans"]
