@@ -59,13 +59,13 @@ class Source:
         self._sad: np.float32 = sad
         self._gantry: np.float32 = np.float32(0)
         self._collimator: np.float32 = np.float32(0)
-        
+
         # Store the isocenter (point around which source rotates)
         if isocenter is None:
             self._isocenter: npt.NDArray[np.float32] = np.array([0, 0, 0], dtype=np.float32)
         else:
             self._isocenter: npt.NDArray[np.float32] = np.array(isocenter, dtype=np.float32)
-        
+
         # Default starting position: source on the negative Y axis
         # at distance SAD from isocenter (units: cm)
         self._position: npt.NDArray[np.float32] = np.array(
@@ -164,7 +164,7 @@ class Source:
         the gantry rotation. The method computes the new cartesian
         position of the source and two successive rotations to build the
         beam basis (collimator then gantry).
-        
+
         The source rotates around the isocenter at distance SAD.
         """
 
@@ -176,7 +176,7 @@ class Source:
         x_rel: np.float32 = self.sad * np.cos(phi * np.pi / 180)
         y_rel: np.float32 = self.sad * -np.sin(phi * np.pi / 180)
         z_rel: np.float32 = np.float32(0)  # Source stays in isocenter Z-plane
-        
+
         # Translate to absolute coordinates by adding isocenter offset
         x: np.float32 = x_rel + self._isocenter[0]
         y: np.float32 = y_rel + self._isocenter[1]
@@ -199,6 +199,6 @@ class Source:
         # Gantry rotation about the Z axis
         p = self._gantry * np.pi / 180
         r_z = np.array([[np.cos(p), -np.sin(p), 0], [np.sin(p), np.cos(p), 0], [0, 0, 1]])
-        self.v_x = np.matmul(r_z, new_v_x)
-        self.v_y = np.matmul(r_z, v_y)
-        self.v_z = np.matmul(r_z, new_v_z)
+        self.v_x = np.matmul(r_z, new_v_x, dtype=np.float32)
+        self.v_y = np.matmul(r_z, v_y, dtype=np.float32)
+        self.v_z = np.matmul(r_z, new_v_z, dtype=np.float32)
