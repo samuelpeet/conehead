@@ -3,12 +3,14 @@
 # For dev
 import sys
 import os
+
 sys.path.append(os.path.join(os.getcwd(), "../build/"))
 import matplotlib.pyplot as plt
 
 
 import numpy as np
 import toml
+import time
 from conehead.dicom import export_dose
 from conehead.exam import Exam
 from conehead.plan import Plan
@@ -19,15 +21,18 @@ from conehead.calculate import calculate
 
 
 # Load machine settings
+t_start = time.perf_counter()
 settings = toml.load("Truebeam_6FFF_M120.toml")
 
 # Load CT/Structure Set and Plan
 # dicom_dir = "Prostate Wedge"
 # dicom_dir = "3DCRT 6FFF"
-dicom_dir = "Output Factors 6FFF"
+dicom_dir = "10"
 # dicom_dir = "MLC Fields 6FFF"
 exam = Exam(dicom_dir=f"{dicom_dir}", hu_lut_path="Siemens_Confidence.toml")
 plan = Plan(dicom_dir=f"{dicom_dir}")
+t_load = time.perf_counter()
+print(f"⏱️  Loading data: {t_load - t_start:.3f}s")
 
 # Define grid geometry for dose calculation
 # grid = Grid(
@@ -47,6 +52,7 @@ grid = Grid(
 )
 
 
+t_beam_start = time.perf_counter()
 for beam in plan.beams:
     beam.dose = Grid(corner=grid.corner, resolution=grid.resolution, num_voxels=grid.num_voxels)
     if beam.type == "STATIC":
@@ -67,11 +73,14 @@ for beam in plan.beams:
         # print(f"Isocenter: {source.isocenter}")
 
         # Initalise the block and compute the fluence maps
+        t_fluence_start = time.perf_counter()
         block = Block(control_point=cp, settings=settings)
         fluence_map_pri, fluence_map_sec = block.get_fluence_maps()
+        t_fluence_end = time.perf_counter()
 
         # Pass everything through to the dose calculation function
         print(f"Calculating beam: {beam.name}")
+        t_calc_start = time.perf_counter()
         beam.dose.values += calculate(  # type: ignore
             grid,
             source,
@@ -81,6 +90,10 @@ for beam in plan.beams:
             cp.jaw_x_positions,
             cp.jaw_y_positions,
             settings,
+        )
+        t_calc_end = time.perf_counter()
+        print(
+            f"⏱️  Fluence: {t_fluence_end - t_fluence_start:.3f}s, Calculation: {t_calc_end - t_calc_start:.3f}s"
         )
         # Scale the dose by the beam MU and fraction number
         beam.dose.values *= beam.mu * plan.num_fractions  # type: ignore
@@ -108,7 +121,6 @@ for beam in plan.beams:
         gantry_angles = [((float(cp.gantry) + 180.0) % 360.0) for cp in control_points]
 
         # Create the source and offset the dose grid as per the isocenter position
-
 
         # Now we want to iterate through the gantry angles and group the control points into sectors.
         # We start from the first angle and keep adding control points until we exceed the sector
@@ -153,7 +165,7 @@ for beam in plan.beams:
             sector_end_angle = (sector[-1].gantry + 180.0) % 360.0
             sector_mid_angle = (sector_start_angle + sector_end_angle) / 2
             sector_mid_angle = (sector_mid_angle + 180.0) % 360.0  # Map back to -180 to 180 range
-            source = Source(isocenter=beam.isocenter_position)            
+            source = Source(isocenter=beam.isocenter_position)
             source.gantry = np.float32(sector_mid_angle)
             source.collimator = np.float32(sector[0].collimator)
 
@@ -166,6 +178,7 @@ for beam in plan.beams:
             jaw_y_positions = np.array([y1, y2], dtype=np.float32)
 
             # Pass everything through to the dose calculation function
+            t_sector_start = time.perf_counter()
             beam.dose.values += calculate(  # type: ignore
                 grid,
                 source,
@@ -176,12 +189,17 @@ for beam in plan.beams:
                 jaw_y_positions,
                 settings,
             )
+            t_sector_end = time.perf_counter()
+            print(f"⏱️  Sector {i + 1}/{len(sectors)}: {t_sector_end - t_sector_start:.3f}s")
             # The calculation for this sector is now complete.
 
         # Scale the dose by the beam MU and fraction number
         beam.dose.values *= beam.mu * plan.num_fractions  # type: ignore
 
 # At this point, all beams have been processed and their dose distributions calculated.
+t_beam_end = time.perf_counter()
+print(f"⏱️  Total beam calculation time: {t_beam_end - t_beam_start:.3f}s")
+
 # Let's sum the dose from all beams to get the total dose distribution for the plan.
 plan.dose = Grid(corner=grid.corner, resolution=grid.resolution, num_voxels=grid.num_voxels)
 for beam in plan.beams:
@@ -189,6 +207,7 @@ for beam in plan.beams:
         plan.dose.values += beam.dose.values  # type: ignore
 
 # Now let's export the total dose distribution to a DICOM RT Dose file.
+t_export_start = time.perf_counter()
 export_dose(
     output_dir=dicom_dir,  # type: ignore
     plan=plan,
@@ -196,6 +215,9 @@ export_dose(
     info_in_file_name=True,
     beam_doses=True,
 )
+t_export_end = time.perf_counter()
+print(f"⏱️  DICOM export: {t_export_end - t_export_start:.3f}s")
+print(f"⏱️  TOTAL TIME: {t_export_end - t_start:.3f}s")
 
 # Job's done!
 

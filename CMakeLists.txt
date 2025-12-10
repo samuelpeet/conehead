@@ -24,4 +24,7 @@ pybind11_add_module(
 
 target_link_libraries(conehead_gpu PRIVATE pybind11::module CUDA::cudart)
 
+# Limit registers per thread to reduce register pressure
+target_compile_options(conehead_gpu PRIVATE $<$<COMPILE_LANGUAGE:CUDA>: "--maxrregcount=32" "--use_fast_math">)
+
 set_target_properties(conehead_gpu PROPERTIES PREFIX "")

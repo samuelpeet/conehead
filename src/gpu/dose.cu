@@ -1,3 +1,4 @@
+#include "texture_utils.cuh"
 #include <cuda_runtime.h>
 #include <iostream>
 #include <pybind11/numpy.h>
@@ -54,7 +55,7 @@ __global__ void dose(float* dose_grid,
     float* resolution,
     int* num_voxels,
     float* corner,
-    float* density_grid,
+    cudaTextureObject_t density_tex,
     float* d_geo_grid,
     float* terma_grid,
     float* mask_grid,
@@ -93,13 +94,6 @@ __global__ void dose(float* dose_grid,
         return;
     }
 
-    // Outside external/support structures
-    if (density_grid[idx] == 0.0f) {
-        // Skip convolution for this voxel
-        dose_grid[idx] = 0.0f;
-        return;
-    }
-
     // Voxel geometry
     float3 resolution_f3 = make_float3(resolution[0], resolution[1], resolution[2]);
     float3 corner_f3 = make_float3(corner[0], corner[1], corner[2]);
@@ -108,81 +102,105 @@ __global__ void dose(float* dose_grid,
         corner_f3.y + resolution_f3.y * (y + 0.5),
         corner_f3.z + resolution_f3.z * (z + 0.5));
 
+    // Outside external/support structures
+    if (tex3D<float>(density_tex, centre_f3.x, centre_f3.y, centre_f3.z) == 0.0f) {
+        // Skip convolution for this voxel
+        dose_grid[idx] = 0.0f;
+        return;
+    }
+
     // Read source basis vectors (assumed to be unit / orthonormal)
     float3 svx = make_float3(source_v_x[0], source_v_x[1], source_v_x[2]);
     float3 svy = make_float3(source_v_y[0], source_v_y[1], source_v_y[2]);
     float3 svz = make_float3(source_v_z[0], source_v_z[1], source_v_z[2]);
 
+    const float kernel_depth_res_cm_inv = 1.0f / kernel_depth_res_cm;
+
     // Precompute trigonometric values for all thetas and phis
+    const float deg_to_rad = 3.141592653589793 / 180.0;
     const int n_thetas = 16;
     const int n_phis = 12;
     float theta_rad_arr[n_thetas];
     float phi_rad_arr[n_phis];
-    float c_t_arr[n_thetas];
-    float s_t_arr[n_thetas];
-    float c_p_arr[n_phis];
-    float s_p_arr[n_phis];
+    // float c_t_arr[n_thetas];
+    // float s_t_arr[n_thetas];
+    // float c_p_arr[n_phis];
+    // float s_p_arr[n_phis];
     for (int it = 0; it < n_thetas; it++) {
-        theta_rad_arr[it] = kernel_thetas[it] * 3.141592653589793 / 180.0;
-        c_t_arr[it] = cos(theta_rad_arr[it]);
-        s_t_arr[it] = sin(theta_rad_arr[it]);
+        theta_rad_arr[it] = kernel_thetas[it] * deg_to_rad;
+        // c_t_arr[it] = cos(theta_rad_arr[it]);
+        // s_t_arr[it] = sin(theta_rad_arr[it]);
     }
     for (int ip = 0; ip < n_phis; ip++) {
-        phi_rad_arr[ip] = (kernel_phis[ip] - 180.0) * 3.141592653589793 / 180.0;
-        c_p_arr[ip] = cos(phi_rad_arr[ip]);
-        s_p_arr[ip] = sin(phi_rad_arr[ip]);
+        phi_rad_arr[ip] = (kernel_phis[ip] - 180.0) * deg_to_rad;
+        // c_p_arr[ip] = cos(phi_rad_arr[ip]);
+        // s_p_arr[ip] = sin(phi_rad_arr[ip]);
     }
 
     // For use in the ray marching loop
     float3 direction_f3 = make_float3(0.0f, 0.0f, 0.0f);
     float3 position_f3 = make_float3(0.0f, 0.0f, 0.0f);
     float dose_acc = 0.0f;
+    float res_x_inv = __frcp_rn(resolution_f3.x);
+    float res_y_inv = __frcp_rn(resolution_f3.y);
+    float res_z_inv = __frcp_rn(resolution_f3.z);
+    int max_steps = __float2int_rd(max_kernel_depth_cm / ds_cm);
 
+#pragma unroll(1)
     for (int it = 0; it < n_thetas; it++) {
+#pragma unroll(1)
         for (int ip = 0; ip < n_phis; ip++) {
-            float s = 0.0f;
-            float d_eq = 0.0f;
-            int max_steps = (int)(max_kernel_depth_cm / ds_cm);
+
+            // float d_eq = 0.0f;
 
             // Initialize ray position at voxel centre
             position_f3.x = centre_f3.x;
             position_f3.y = centre_f3.y;
             position_f3.z = centre_f3.z;
 
-            float local_x = c_t_arr[it] * s_p_arr[ip]; // local frame x
-            float local_y = c_p_arr[ip]; // local frame y
-            float local_z = s_t_arr[it] * s_p_arr[ip]; // local frame z
+            float local_x = cos(theta_rad_arr[it]) * sin(phi_rad_arr[ip]); // local frame x
+            float local_y = cos(phi_rad_arr[ip]); // local frame y
+            float local_z = sin(theta_rad_arr[it]) * sin(phi_rad_arr[ip]); // local frame z
 
             // Transform local/source-frame direction into world coordinates using basis vectors
             direction_f3.x = local_x * svx.x + local_y * svy.x + local_z * svz.x;
             direction_f3.y = local_x * svx.y + local_y * svy.y + local_z * svz.y;
             direction_f3.z = local_x * svx.z + local_y * svy.z + local_z * svz.z;
 
-            // Normalize
-            float mag = sqrt(direction_f3.x * direction_f3.x + direction_f3.y * direction_f3.y + direction_f3.z * direction_f3.z);
-            direction_f3.x /= mag;
-            direction_f3.y /= mag;
-            direction_f3.z /= mag;
+            // // Normalize
+            // float mag = sqrt(direction_f3.x * direction_f3.x + direction_f3.y * direction_f3.y + direction_f3.z * direction_f3.z);
+            // direction_f3.x /= mag;
+            // direction_f3.y /= mag;
+            // direction_f3.z /= mag;
+
+            float s = 0.0f; // Distance travelled along ray (cm)
+            float omega_ds = kernel_omegas[ip] * ds_cm;
+            int kernel_base_idx = ip * n_depth_bins;
+            int nx_ny = nx * ny;
 
             // We have direction and starting position; time to march along ray
             for (int step = 0; step < max_steps; step++) {
 
                 // Map position → voxel indices
-                int ix = (int)((position_f3.x - corner_f3.x) / resolution_f3.x);
-                int iy = (int)((position_f3.y - corner_f3.y) / resolution_f3.y);
-                int iz = (int)((position_f3.z - corner_f3.z) / resolution_f3.z);
-                int idx2 = ix + iy * nx + iz * nx * ny;
-                if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || iz < 0 || iz >= nz) {
-                    break; // Ray left grid
+                float fx = (position_f3.x - corner_f3.x) * res_x_inv;
+                float fy = (position_f3.y - corner_f3.y) * res_y_inv;
+                float fz = (position_f3.z - corner_f3.z) * res_z_inv;
+                int ix = __float2int_rd(fx);
+                int iy = __float2int_rd(fy);
+                int iz = __float2int_rd(fz);
+                int idx2 = ix + iy * nx + iz * nx_ny;
+                if ((unsigned)ix >= nx || (unsigned)iy >= ny || (unsigned)iz >= nz) {
+                    break; // Ray left grid. Unsigned speedup as negative values wrap to huge unsigned values
                 }
                 // Accumulate radiological depth
-                float rho = density_grid[idx2];
-                float terma = terma_grid[idx2];
+                float rho = tex3D<float>(density_tex, fx + 0.5f, fy + 0.5f, fz + 0.5f);
+                float terma = __ldg(&terma_grid[idx2]);
                 // float dt_wet = rho * ds_cm;
                 // rad_depth += dt_wet;
 
-                float ds_eff = 1 / rho * ds_cm; // cm in water-equivalent space
-                d_eq += ds_eff;
+                float rho_inv = __frcp_rn(rho);
+                float ds_eff = rho_inv * ds_cm; // cm in water-equivalent space
+                // d_eq += ds_eff;
                 // s += ds_cm;
 
                 // Advance a step
@@ -192,21 +210,22 @@ __global__ void dose(float* dose_grid,
                 s += ds_cm;
 
                 // Lookup kernel value corresponding to this radiological depth
-                int depth_idx = (int)(s / kernel_depth_res_cm);
-                if (depth_idx >= n_depth_bins) {
+                int depth_idx = __float2int_rz(s * kernel_depth_res_cm_inv);
+                if (depth_idx >= n_depth_bins || s >= max_kernel_depth_cm) {
                     break; // Beyond end of kernel
                 }
-                float kernel_value = kernel[ip * n_depth_bins + depth_idx];
-                float vol = kernel_omegas[ip] * ds_cm * s * s; // Volume of sample sector
+                float kernel_value = kernel[kernel_base_idx + depth_idx];
+                float vol = omega_ds * s * s; // Volume of sample sector
                 dose_acc += terma * kernel_value * vol;
-                if (s >= max_kernel_depth_cm) {
-                    break;
-                }
+                // if (s >= max_kernel_depth_cm) {
+                //     break;
+                // }
             }
         }
     }
     // Compute no-tilt approximation inverse-square law rescaling
-    float no_tilt_rescaling = (source_sad / d_geo_grid[idx]) * (source_sad / d_geo_grid[idx]);
+    float d_geo = __ldg(&d_geo_grid[idx]);
+    float no_tilt_rescaling = (source_sad / d_geo) * (source_sad / d_geo);
 
     // Store final dose
     dose_grid[idx] = dose_acc * no_tilt_rescaling;
@@ -304,7 +323,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
     float* source_v_z_ptr = reinterpret_cast<float*>(source_v_z_info.ptr);
 
     // Allocate device memory and copy inputs
-    float *d_dose_grid, *d_resolution, *d_corner, *d_density_grid, *d_d_geo_grid;
+    float *d_dose_grid, *d_resolution, *d_corner, *d_d_geo_grid; //, *d_density_grid;
     float *d_terma_grid, *d_mask_grid;
     float *d_kernel_thetas, *d_kernel_phis, *d_kernel_omegas, *d_kernel;
     float *d_source_position, *d_source_v_x, *d_source_v_y, *d_source_v_z;
@@ -313,7 +332,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
     cudaMalloc(&d_resolution, resolution_info.size * sizeof(float));
     cudaMalloc(&d_num_voxels, num_voxels_info.size * sizeof(int));
     cudaMalloc(&d_corner, corner_info.size * sizeof(float));
-    cudaMalloc(&d_density_grid, density_grid_info.size * sizeof(float));
+    // cudaMalloc(&d_density_grid, density_grid_info.size * sizeof(float));
     cudaMalloc(&d_d_geo_grid, d_geo_grid_info.size * sizeof(float));
     cudaMalloc(&d_terma_grid, terma_grid_info.size * sizeof(float));
     cudaMalloc(&d_mask_grid, mask_grid_info.size * sizeof(float));
@@ -329,7 +348,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
     cudaMemcpy(d_resolution, resolution_ptr, resolution_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_num_voxels, num_voxels_ptr, num_voxels_info.size * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_corner, corner_ptr, corner_info.size * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_density_grid, density_grid_ptr, density_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_density_grid, density_grid_ptr, density_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_d_geo_grid, d_geo_grid_ptr, d_geo_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_terma_grid, terma_grid_ptr, terma_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_mask_grid, mask_grid_ptr, mask_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
@@ -342,6 +361,10 @@ void map_dose(pybind11::array_t<float> dose_grid,
     cudaMemcpy(d_source_v_y, source_v_y_ptr, source_v_y_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_source_v_z, source_v_z_ptr, source_v_z_info.size * sizeof(float), cudaMemcpyHostToDevice);
 
+    // Create texture object from host density array (helper in texture_utils.cuh)
+    Texture3DHandle texh = create_texture3d_from_ptr(density_grid_ptr, num_voxels_ptr[0], num_voxels_ptr[1], num_voxels_ptr[2], cudaFilterModeLinear);
+    cudaTextureObject_t density_tex = texh.tex;
+
     // Launch kernel
     dim3 dimBlock(16, 4, 4);
     dim3 dimGrid((num_voxels_ptr[0] + dimBlock.x - 1) / dimBlock.x,
@@ -349,7 +372,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
         (num_voxels_ptr[2] + dimBlock.z - 1) / dimBlock.z);
 
     dose<<<dimGrid, dimBlock>>>(d_dose_grid, d_resolution, d_num_voxels, d_corner,
-        d_density_grid, d_d_geo_grid, d_terma_grid, d_mask_grid,
+        density_tex, d_d_geo_grid, d_terma_grid, d_mask_grid,
         d_kernel_thetas, d_kernel_phis, d_kernel_omegas, d_kernel,
         source_sad, d_source_position, d_source_v_x, d_source_v_y, d_source_v_z,
         n_depth_bins, kernel_depth_res_cm, max_kernel_depth_cm, ds_cm);
@@ -365,7 +388,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
     cudaFree(d_resolution);
     cudaFree(d_num_voxels);
     cudaFree(d_corner);
-    cudaFree(d_density_grid);
+    // cudaFree(d_density_grid);
     cudaFree(d_d_geo_grid);
     cudaFree(d_terma_grid);
     cudaFree(d_mask_grid);
@@ -377,4 +400,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
     cudaFree(d_source_v_x);
     cudaFree(d_source_v_y);
     cudaFree(d_source_v_z);
+
+    // Destroy texture and free CUDA array (helper)
+    destroy_texture3d(texh);
 }
