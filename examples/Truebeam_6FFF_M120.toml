@@ -1,4 +1,8 @@
 # Settings file for Varian Truebeam 6FFF with Millenium 120 MLC
+[meta]
+nominal_energy = 6 # MV
+fff = true
+
 [sources]
 pri_s = 0.9 #0.98373769
 pri_x = 0.14093192 # cm
