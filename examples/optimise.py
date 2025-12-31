@@ -460,3 +460,152 @@ ax.legend()
 ax.grid()
 
 # %%
+# Profile and PDD agreement plots
+gold = import_gold_beam_data()
+exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
+settings = toml.load("Truebeam_6FFF_M120.toml")
+# fss = [3, 4, 6, 8, 10, 20, 30, 40]
+fss = [3, 4, 6, 8, 10, 20, 30, 40]
+calc = calculate_doses(fss, exam, settings)
+#%%
+for fs in fss:
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [3, 1]}, sharex=True)
+    
+    # Top subplot: overlay both curves
+    ax1.set_title("Percentage Depth Dose Comparison for Field Size: {} cm".format(fs))
+    ax1.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635, label="Measured")
+    ax1.plot(calc[fs]["pdd"][0], calc[fs]["pdd"][1], 'o', color='red', fillstyle='none', label="Conehead")  # Unfilled red circles
+    ax1.set_ylabel("Dose (Gy)")
+    ax1.legend()
+    ax1.grid(which='both', linewidth=0.5, alpha=0.7)
+    ax1.xaxis.set_major_locator(plt.MultipleLocator(1.0))
+    ax1.xaxis.set_minor_locator(plt.MultipleLocator(0.5))
+    
+    # Set major ticks and gridlines every 0.1 Gy on the y-axis
+    ax1.yaxis.set_major_locator(plt.MultipleLocator(0.1))
+    ax1.yaxis.set_minor_locator(plt.MultipleLocator(0.05))
+    ax1.grid(which='major', linewidth=1.0)  # Major gridlines bolder
+    ax1.grid(which='minor', linewidth=0.5)  # Minor gridlines thinner
+    
+    # Bottom subplot: percentage difference
+    gold_dose = gold[fs]["pdd"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635
+    calc_dose_interp = np.interp(gold[fs]["pdd"][0], calc[fs]["pdd"][0], calc[fs]["pdd"][1])
+    pct_diff = 100 * (calc_dose_interp - gold_dose) / gold_dose
+    ax2.plot(gold[fs]["pdd"][0], pct_diff, color='black', linewidth=2)  # Thick black line
+    ax2.axhline(y=0, color='k', linestyle='--', linewidth=0.5)
+    ax2.set_xlim(0, 30)
+    ax2.set_ylim(-2, 2)
+    ax2.set_xlabel("Depth (cm)")
+    ax2.set_ylabel("Local Difference (%)")
+    ax2.grid(which='both', linewidth=0.5, alpha=0.7)
+    ax2.xaxis.set_major_locator(plt.MultipleLocator(1.0))
+    ax2.xaxis.set_minor_locator(plt.MultipleLocator(0.5))
+    ax2.grid(which='major', linewidth=1.0)  # Major gridlines bolder
+    ax2.grid(which='minor', linewidth=0.5)  # Minor gridlines thinner
+
+    plt.tight_layout()
+
+# %%
+lines = []
+fig, ax = plt.subplots(1, 1, figsize=(14, 8))
+for fs in fss:
+    line1, = ax.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635, color='red', label='Measured')
+    line2, = ax.plot(calc[fs]["pdd"][0], calc[fs]["pdd"][1], '-', color='#3535ff', label='Calculated')          
+    lines.append(line1)
+    lines.append(line2)
+    ax.set_facecolor("#1f1f1f")
+    fig.patch.set_facecolor('#1f1f1f')
+    ax.grid(which='major', linewidth=0.5, alpha=0.7, color="#cccccc")
+    ax.grid(which='minor', linewidth=0.5, alpha=0.7, color="#cccccc", linestyle='dotted')
+    ax.xaxis.set_major_locator(plt.MultipleLocator(5.0))
+    ax.xaxis.set_minor_locator(plt.MultipleLocator(1.0))
+    ax.yaxis.set_major_locator(plt.MultipleLocator(0.2))
+    ax.yaxis.set_minor_locator(plt.MultipleLocator(0.05))
+    ax.set_ylabel("Dose (Gy)")
+    ax.set_xlim(0, 30)
+    ax.set_ylim(0, 1.1)
+    ax.set_xlabel("Depth (cm)")
+    ax.set_title("PDD Comparison for Various Field Sizes (3, 4, 6, 8, 10, 20, 30, 40 cm)")
+    ax.spines['top'].set_color('#cccccc')
+    ax.spines['bottom'].set_color('#cccccc')
+    ax.spines['left'].set_color('#cccccc')
+    ax.spines['right'].set_color('#cccccc')
+    ax.tick_params(axis='both', colors='#cccccc', width=0.5)
+    plt.tight_layout()
+
+plt.legend(handles=[lines[0], lines[1]])
+
+# %%
+lines = []
+fig, ax = plt.subplots(1, 1, figsize=(14, 8))
+for fs in fss:
+    line1, = ax.plot(gold[fs]["prof_15"][0], gold[fs]["prof_15"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635, color='red', label='Measured')
+    line2, = ax.plot(calc[fs]["prof_15"][0], calc[fs]["prof_15"][1], '-', color="#3535ff", label='Calculated')
+    ax.plot(gold[fs]["prof_50"][0], gold[fs]["prof_50"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635, color='red', label='Measured')
+    ax.plot(calc[fs]["prof_50"][0], calc[fs]["prof_50"][1], '-', color='#3535ff', label='Calculated')    
+    ax.plot(gold[fs]["prof_100"][0], gold[fs]["prof_100"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635, color='red', label='Measured')
+    ax.plot(calc[fs]["prof_100"][0], calc[fs]["prof_100"][1], '-', color='#3535ff', label='Calculated')   
+    ax.plot(gold[fs]["prof_200"][0], gold[fs]["prof_200"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635, color='red', label='Measured')
+    ax.plot(calc[fs]["prof_200"][0], calc[fs]["prof_200"][1], '-', color='#3535ff', label='Calculated')   
+    ax.plot(gold[fs]["prof_300"][0], gold[fs]["prof_300"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635, color='red', label='Measured')
+    ax.plot(calc[fs]["prof_300"][0], calc[fs]["prof_300"][1], '-', color='#3535ff', label='Calculated')               
+    lines.append(line1)
+    lines.append(line2)
+    ax.set_facecolor("#1f1f1f")
+    fig.patch.set_facecolor('#1f1f1f')
+    ax.grid(which='major', linewidth=0.5, alpha=0.7, color="#cccccc")
+    ax.grid(which='minor', linewidth=0.5, alpha=0.7, color="#cccccc", linestyle='dotted')
+    ax.xaxis.set_major_locator(plt.MultipleLocator(5.0))
+    ax.xaxis.set_minor_locator(plt.MultipleLocator(1.0))
+    ax.yaxis.set_major_locator(plt.MultipleLocator(0.2))
+    ax.yaxis.set_minor_locator(plt.MultipleLocator(0.05))
+    ax.spines['top'].set_color('#cccccc')
+    ax.spines['bottom'].set_color('#cccccc')
+    ax.spines['left'].set_color('#cccccc')
+    ax.spines['right'].set_color('#cccccc')
+    ax.tick_params(axis='both', colors='#cccccc', width=0.5)
+    ax.set_ylabel("Dose (Gy)")
+    ax.set_xlim(-30, 30)
+    ax.set_xlabel("Position (cm)")
+    ax.set_title("Lateral Profile Comparison for Various Field Sizes (3, 4, 6, 8, 10, 20, 30, 40 cm)")
+    plt.tight_layout()    
+plt.legend(handles=[lines[0], lines[1]])
+
+# %%
+plt.style.use('dark_background')
+lines = []
+fig, ax = plt.subplots(1, 1, figsize=(14, 8))
+fs = 40
+line1, = ax.plot(gold[fs]["diag_15"][0], gold[fs]["diag_15"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635, color='red', label='Measured')
+line2, = ax.plot(calc[fs]["diag_15"][0], calc[fs]["diag_15"][1], '-', color="#3535ff", label='Calculated')
+ax.plot(gold[fs]["diag_50"][0], gold[fs]["diag_50"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635, color='red', label='Measured')
+ax.plot(calc[fs]["diag_50"][0], calc[fs]["diag_50"][1], '-', color='#3535ff', label='Calculated')    
+ax.plot(gold[fs]["diag_100"][0], gold[fs]["diag_100"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635, color='red', label='Measured')
+ax.plot(calc[fs]["diag_100"][0], calc[fs]["diag_100"][1], '-', color='#3535ff', label='Calculated')   
+ax.plot(gold[fs]["diag_200"][0], gold[fs]["diag_200"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635, color='red', label='Measured')
+ax.plot(calc[fs]["diag_200"][0], calc[fs]["diag_200"][1], '-', color='#3535ff', label='Calculated')   
+ax.plot(gold[fs]["diag_300"][0], gold[fs]["diag_300"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.635, color='red', label='Measured')
+ax.plot(calc[fs]["diag_300"][0], calc[fs]["diag_300"][1], '-', color='#3535ff', label='Calculated')               
+lines.append(line1)
+lines.append(line2)
+ax.set_facecolor("#1f1f1f")
+fig.patch.set_facecolor('#1f1f1f')
+ax.grid(which='major', linewidth=0.5, alpha=0.7, color="#cccccc")
+ax.grid(which='minor', linewidth=0.5, alpha=0.7, color="#cccccc", linestyle='dotted')
+ax.xaxis.set_major_locator(plt.MultipleLocator(5.0))
+ax.xaxis.set_minor_locator(plt.MultipleLocator(1.0))
+ax.yaxis.set_major_locator(plt.MultipleLocator(0.2))
+ax.yaxis.set_minor_locator(plt.MultipleLocator(0.05))
+ax.spines['top'].set_color('#cccccc')
+ax.spines['bottom'].set_color('#cccccc')
+ax.spines['left'].set_color('#cccccc')
+ax.spines['right'].set_color('#cccccc')
+ax.tick_params(axis='both', colors='#cccccc', width=0.5)
+ax.set_ylabel("Dose (Gy)")
+ax.set_xlim(-35, 35)
+ax.set_xlabel("Position (cm)")
+ax.set_title("Diagonal Profile Comparison for 40 x 40 cm2 Field Size")
+plt.tight_layout()
+plt.legend(handles=[lines[0], lines[1]])
+
+# %%

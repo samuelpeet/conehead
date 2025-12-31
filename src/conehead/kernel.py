@@ -215,7 +215,6 @@ class Kernel:
         self.weights = np.zeros_like(energies, dtype=np.float32)
         for i in range(len(energies)):
             self.weights[i] = np.interp(field_size, [3, 10, 40], [weights_3[i], weights_10[i], weights_40[i]])
-        print(self.weights)
         mu_w = mu_water(energies).astype(np.float32)
 
         spectrum_depth_res_cm = np.float32(0.2)
