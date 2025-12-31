@@ -178,8 +178,15 @@ def calculate(
 
 
 
+    oas_oads = settings["off_axis_softening"]["oads"]
+    oas_factors = settings["off_axis_softening"]["factors"]
+    oas_oads_interp_dx = 0.5
+    oas_oads_interp_max = 40.0
+    oas_oads_interp = np.arange(0, oas_oads_interp_max, oas_oads_interp_dx)
 
+    fudge_factor = 0.1
 
+    oas_factors_interp = np.interp(oas_oads_interp, oas_oads, oas_factors).astype(np.float32) * fudge_factor
 
 
 
@@ -195,10 +202,10 @@ def calculate(
         mu_w=mu_water(np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)),
         source_sad=source.sad,
         oad_grid=oad_grid,
-        off_axis_softening_fs_interp=np.array(
-            settings["off_axis_softening"]["factors"], dtype=np.float32
-        ),
-        off_axis_softening_dx=np.float32(40.0),
+        off_axis_softening_fs_interp=oas_factors_interp,
+        off_axis_softening_dx=np.float32(oas_oads_interp_dx),
+        off_axis_softening_oad_max=np.float32(oas_oads_interp_max),
+        
     )
 
 

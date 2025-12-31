@@ -16,47 +16,51 @@ from conehead.calculate import calculate
 import pandas as pd
 from scipy.optimize import minimize
 
+toml_file = "Truebeam_6_M120.toml"
+gold_data_file = "6MV Beam Data.xlsx"
+
 
 def import_gold_beam_data():
     # Read gold beam PDDs and crossline profiles. Profiles are scaled by the PDD at the profile depth.
     gold = {}
-    df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Profiles at 1.5cm")
+    df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 1.5cm")
     fss = [3, 4, 6, 8, 10, 20, 30, 40]
-    ofs = [0.838663, 0.874284, 0.92817, 0.969307, 1.0, 1.083025, 1.113093, 1.132091]
+    # ofs = [0.838663, 0.874284, 0.92817, 0.969307, 1.0, 1.083025, 1.113093, 1.132091]  # 6FFF
+    ofs = [0.827548, 0.862568, 0.917877, 0.965234, 1.0, 1.102564, 1.144229, 1.178926]  # 6MV
     for i, v in enumerate(fss):
         gold[v] = {}
         gold[v]["of"] = ofs[i]
-        df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Depth Dose")
+        df = pd.read_excel(gold_data_file, sheet_name="Open Field Depth Dose")
         gold[v]["pdd"] = [
             df.iloc[5:, 0].to_numpy().astype(np.float32),
             df.iloc[5:, i + 1].to_numpy().astype(np.float32) / 100,
         ]
-        df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Profiles at 1.5cm")
+        df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 1.5cm")
         gold[v]["prof_15"] = [
             df.iloc[7:, 0].to_numpy().astype(np.float32),
             df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][15],
         ]
-        df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Profiles at 5cm")
+        df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 5cm")
         gold[v]["prof_50"] = [
             df.iloc[7:, 0].to_numpy().astype(np.float32),
             df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][50],
         ]
-        df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Profiles at 10cm")
+        df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 10cm")
         gold[v]["prof_100"] = [
             df.iloc[7:, 0].to_numpy().astype(np.float32),
             df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][100],
         ]
-        df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Profiles at 20cm")
+        df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 20cm")
         gold[v]["prof_200"] = [
             df.iloc[7:, 0].to_numpy().astype(np.float32),
             df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][200],
         ]
-        df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Open Field Profiles at 30cm")
+        df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 30cm")
         gold[v]["prof_300"] = [
             df.iloc[7:, 0].to_numpy().astype(np.float32),
             df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][300],
         ]
-    df = pd.read_excel("6FFF Beam Data.xlsx", sheet_name="Diagonal Profiles")
+    df = pd.read_excel(gold_data_file, sheet_name="Diagonal Profiles")
     gold[40]["diag_15"] = [
         df.iloc[6:, 0].to_numpy().astype(np.float32),
         df.iloc[6:, 1].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][15],
@@ -206,7 +210,7 @@ def difference_in_pdds(calc, gold):
 
 def optimise_pdd(x, exam, gold):
     # Update settings with new energy spectrum
-    settings = toml.load("Truebeam_6FFF_M120.toml")
+    settings = toml.load(toml_file)
     energies = np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)
 
     # c1 = x[0]
@@ -280,7 +284,7 @@ x_10 = [6.37866626e-01, 5.24930987e-02, 1.02095518e-01, 3.23278437e-05, 2.712605
 x_40 = [3.11421911e-01, 6.85822548e-02, 2.12540862e-01, 3.23181680e-05, 5.48393311e-03, 1.93255940e-03, 3.55081544e-05, 0.00000000e+00, 2.96541822e-04, 2.79249071e-06, 3.87204832e-04, 2.59697551e-05]
 x = x_40
 
-settings = toml.load("Truebeam_6FFF_M120.toml")
+settings = toml.load(toml_file)
 energies = np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)
 
 energy_weights = np.array(
@@ -320,7 +324,7 @@ for fs in fss:
 # %%
 def calculate_normalisation():
     exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
-    settings = toml.load("Truebeam_6FFF_M120.toml")
+    settings = toml.load(toml_file)
     settings["calculation"]["normalisation"] = np.float32(1.0)
     calc = calculate_doses([10], exam, settings)
     d_max = np.argmax(calc[10]["pdd"][1])
@@ -348,7 +352,7 @@ def calculate_ofcs(fss, exam, settings, gold):
 
 gold = import_gold_beam_data()
 exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
-settings = toml.load("Truebeam_6FFF_M120.toml")
+settings = toml.load(toml_file)
 fss = [3, 4, 6, 8, 10, 20, 30, 40]
 calc = calculate_ofcs(fss, exam, settings, gold)
 for fs in calc.keys():
@@ -377,7 +381,7 @@ def difference_in_diag(calc, gold):
 
 def optimise_bpc(x, exam, gold):
     # Update settings with new beam profile correction
-    settings = toml.load("Truebeam_6FFF_M120.toml")
+    settings = toml.load(toml_file)
     settings["beam_profile_correction"]["factors"] = np.insert(x, 0, 1.00)
     calc = calculate_doses([40], exam, settings)
     diff = difference_in_diag(calc, gold) * 100
@@ -441,7 +445,7 @@ result = minimize(optimise_bpc, x0, args=(exam, gold), method="Nelder-Mead", bou
 
 
 # %%
-settings = toml.load("Truebeam_6FFF_M120.toml")
+settings = toml.load(toml_file)
 exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
 fig, ax = plt.subplots(1, 1, figsize=(16, 12))
 # gold = import_gold_beam_data()
@@ -463,9 +467,9 @@ ax.grid()
 # Profile and PDD agreement plots
 gold = import_gold_beam_data()
 exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
-settings = toml.load("Truebeam_6FFF_M120.toml")
+settings = toml.load(toml_file)
 # fss = [3, 4, 6, 8, 10, 20, 30, 40]
-fss = [3, 4, 6, 8, 10, 20, 30, 40]
+fss = [40]
 calc = calculate_doses(fss, exam, settings)
 #%%
 for fs in fss:
@@ -506,6 +510,7 @@ for fs in fss:
     plt.tight_layout()
 
 # %%
+plt.style.use('dark_background')
 lines = []
 fig, ax = plt.subplots(1, 1, figsize=(14, 8))
 for fs in fss:
@@ -536,6 +541,7 @@ for fs in fss:
 plt.legend(handles=[lines[0], lines[1]])
 
 # %%
+plt.style.use('dark_background')
 lines = []
 fig, ax = plt.subplots(1, 1, figsize=(14, 8))
 for fs in fss:

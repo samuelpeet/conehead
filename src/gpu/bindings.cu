@@ -28,7 +28,7 @@ PYBIND11_MODULE(conehead_gpu, m)
     m.def("terma", &map_terma, py::arg("terma_grid"), py::arg("fluence_grid"), py::arg("d_geo_grid"),
         py::arg("d_eff_grid"), py::arg("num_voxels"), py::arg("num_energies"), py::arg("energies"),
         py::arg("energy_weights"), py::arg("mu_w"), py::arg("source_sad"),
-        py::arg("oad_grid"), py::arg("off_axis_softening_fs_interp"), py::arg("off_axis_softening_dx"));
+        py::arg("oad_grid"), py::arg("off_axis_softening_fs_interp"), py::arg("off_axis_softening_dx"),py::arg("off_axis_softening_oad_max"));
     m.def("mask", &map_mask, py::arg("mask_grid"), py::arg("terma_grid"), py::arg("num_voxels"),
         py::arg("resolution"), py::arg("max_distance_cm"), py::arg("terma_threshold"));
     m.def("dose", &map_dose, py::arg("dose_grid"), py::arg("resolution"), py::arg("num_voxels"), py::arg("corner"),

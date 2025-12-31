@@ -34,6 +34,7 @@
  * @param[in]  oad_grid         Device pointer to off-axis-distance grid (nx*ny*nz) for optional off-axis softening (unused here).
  * @param[in]  off_axis_softening_fs_interp Device pointer to LUT for off-axis softening (optional/unused).
  * @param[in]  off_axis_softening_dx Grid spacing for off-axis softening LUT (optional/unused).
+ * @param[in]  off_axis_softening_oad_max Maximum off-axis distance for softening LUT (optional/unused).
  *
  * @note Off-axis softening is not applied in the current implementation; the
  *       commented code shows an approach that would modify per-bin weights
@@ -51,7 +52,8 @@ __global__ void terma(float* terma_grid,
     float source_sad,
     float* oad_grid,
     float* off_axis_softening_fs_interp,
-    float off_axis_softening_dx)
+    float off_axis_softening_dx,
+    float off_axis_softening_oad_max)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -64,10 +66,11 @@ __global__ void terma(float* terma_grid,
     if (x < nx && y < ny && z < nz) {
         int idx = x + y * nx + z * nx * ny;
 
-        // float oad = oad_grid[idx];
-        // int ix = (int)(oad / off_axis_softening_dx);
-        // float oas = off_axis_softening_fs_interp[ix];
-        //
+        float oad = oad_grid[idx];
+        int ix = (int)(oad / off_axis_softening_dx);
+        ix = min(ix, (int)(off_axis_softening_oad_max / off_axis_softening_dx) - 1);
+        float oas = off_axis_softening_fs_interp[ix];
+        
         // float new_energy_weights[12]; // Assuming a maximum of 12 energy bins
         // for (int i = 0; i < num_energies; i++)
         // {
@@ -86,7 +89,7 @@ __global__ void terma(float* terma_grid,
         float terma = 0;
         for (int i = 0; i < num_energies; i++) {
             float fluence = fluence_grid[idx];
-            float d_eff = d_eff_grid[idx];
+            float d_eff = d_eff_grid[idx] + oas;
             terma += energy_weights[i] * fluence * expf(-mu_w[i] * d_eff) * mu_w[i] * energies[i];
         }
         float d_geo = d_geo_grid[idx];
@@ -140,7 +143,8 @@ void map_terma(
     float source_sad,
     pybind11::array_t<float> oad_grid,
     pybind11::array_t<float> off_axis_softening_fs_interp,
-    float off_axis_softening_dx)
+    float off_axis_softening_dx,
+    float off_axis_softening_oad_max)
 {
     pybind11::buffer_info terma_grid_info = terma_grid.request();
     pybind11::buffer_info fluence_grid_info = fluence_grid.request();
@@ -209,7 +213,8 @@ void map_terma(
         source_sad,
         d_oad_grid,
         d_off_axis_softening_fs_interp,
-        off_axis_softening_dx);
+        off_axis_softening_dx,
+        off_axis_softening_oad_max);
 
     // Copy result back to host
     cudaMemcpy(terma_grid_ptr, d_terma_grid,

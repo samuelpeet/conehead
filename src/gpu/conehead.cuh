@@ -58,7 +58,8 @@ __global__ void terma(float* terma_grid,
     float source_sad,
     float* oad_grid,
     float* off_axis_softening_fs_interp,
-    float off_axis_softening_dx);
+    float off_axis_softening_dx,
+    float off_axis_softening_oad_max);
 
 __global__ void mask(float* mask_grid,
     float* terma_grid,
@@ -132,7 +133,8 @@ void map_terma(
     float source_sad,
     pybind11::array_t<float> oad_grid,
     pybind11::array_t<float> off_axis_softening_fs_interp,
-    float off_axis_softening_dx);
+    float off_axis_softening_dx,
+    float off_axis_softening_oad_max);
 
 void map_mask(pybind11::array_t<float> mask_grid,
     pybind11::array_t<float> terma_grid,
