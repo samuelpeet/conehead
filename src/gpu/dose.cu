@@ -26,7 +26,8 @@
  *    or the travelled distance exceeds `max_kernel_depth_cm`.
  *
  * Important implementation notes:
- *  - Angular sampling uses hard-coded counts (n_thetas=16, n_phis=12); kernel layout is [phi][depth].
+ *  - Kernel values are cumulative: kernel[phi, depth_i] = integral from depth 0 to depth_i.
+ *  - Dose contribution in each shell is the difference: delta = kernel[depth_i] - kernel[depth_i-1].
  *  - kernel_omegas contains per-phi solid-angle weights; sample contribution volume is
  *    kernel_omegas[ip] * ds_cm * s * s, where s is the distance travelled along the ray.
  *  - All 3D grids use flattened row-major indexing.
@@ -36,19 +37,25 @@
  * @param[in]  num_voxels        Device pointer to int[3] = {nx,ny,nz}.
  * @param[in]  corner            Device pointer to float[3] world-space grid corner (min x,y,z).
  * @param[in]  density_grid      Device pointer to flattened density grid (nx*ny*nz).
+ * @param[in]  d_eff_grid        Device pointer to flattened radiological depth grid (nx*ny*nz).
  * @param[in]  d_geo_grid        Device pointer to geometric distances (nx*ny*nz) used for final rescaling.
  * @param[in]  terma_grid       Device pointer to flattened TERMA grid (nx*ny*nz) (output of terma()).
  * @param[in]  mask_grid         Device pointer to flattened mask (0.0/1.0) used to skip work when zero.
  * @param[in]  kernel_thetas     Device pointer to array of theta angles (degrees), length n_thetas (16).
  * @param[in]  kernel_phis       Device pointer to array of phi angles (degrees), length n_phis (12).
  * @param[in]  kernel_omegas     Device pointer to per-phi solid-angle weights, length n_phis.
- * @param[in]  kernel            Device pointer to flattened kernel values sized n_phis * n_depth_bins (layout [phi][depth]).
+ * @param[in]  kernel            Device pointer to flattened cumulative kernel values sized n_spectrum_depth_bins * n_phis * n_depth_bins
+ *                               (layout [spectrum_depth][phi][depth]).
  * @param[in]  source_sad        Source-to-axis distance used for no-tilt rescaling.
  * @param[in]  source_position   Device pointer to float[3] (not used for alignment in current impl.).
  * @param[in]  source_v_x/y/z    Device pointers to float[3] source basis vectors (present for context).
- * @param[in]  n_depth_bins      Number of depth samples per kernel (kernel depth axis length).
- * @param[in]  kernel_depth_res_cm Depth resolution of kernel bins (cm).
- * @param[in]  max_kernel_depth_cm Maximum kernel depth to march (cm).
+ * @param[in]  n_depth_bins      Number of radial depth samples per kernel (kernel depth axis length).
+ * @param[in]  n_spectrum_depth_bins Number of spectrum-hardening depth bins.
+ * @param[in]  kernel_depth_res_cm Depth resolution of kernel radial bins (cm).
+ * @param[in]  max_kernel_depth_cm Maximum kernel radial depth to march (cm).
+ * @param[in]  spectrum_depth_res_cm Depth resolution for spectrum-hardening bins (cm).
+ * @param[in]  max_spectrum_depth_cm Maximum spectrum-hardening depth captured (cm).
+ * @param[in]  spectrum_hardening_enable Flag to enable/disable spectrum hardening (true=enabled, false=use surface spectrum).
  * @param[in]  ds_cm             Ray-marching step size (cm).
  */
 __global__ void dose(float* dose_grid,
@@ -56,6 +63,7 @@ __global__ void dose(float* dose_grid,
     int* num_voxels,
     float* corner,
     cudaTextureObject_t density_tex,
+    float* d_eff_grid,
     float* d_geo_grid,
     float* terma_grid,
     float* mask_grid,
@@ -69,8 +77,12 @@ __global__ void dose(float* dose_grid,
     float* source_v_y,
     float* source_v_z,
     int n_depth_bins,
+    int n_spectrum_depth_bins,
     float kernel_depth_res_cm,
     float max_kernel_depth_cm,
+    float spectrum_depth_res_cm,
+    float max_spectrum_depth_cm,
+    int spectrum_hardening_enable,
     float ds_cm)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -115,6 +127,7 @@ __global__ void dose(float* dose_grid,
     float3 svz = make_float3(source_v_z[0], source_v_z[1], source_v_z[2]);
 
     const float kernel_depth_res_cm_inv = 1.0f / kernel_depth_res_cm;
+    const float spectrum_depth_res_cm_inv = 1.0f / spectrum_depth_res_cm;
 
     // Precompute trigonometric values for all thetas and phis
     const float deg_to_rad = 3.141592653589793 / 180.0;
@@ -137,6 +150,10 @@ __global__ void dose(float* dose_grid,
         // s_p_arr[ip] = sin(phi_rad_arr[ip]);
     }
 
+    const int kernel_phi_stride = n_depth_bins;
+    const int kernel_depth_stride = n_phis * kernel_phi_stride;
+    const int max_spectrum_bin = n_spectrum_depth_bins - 1;
+
     // For use in the ray marching loop
     float3 direction_f3 = make_float3(0.0f, 0.0f, 0.0f);
     float3 position_f3 = make_float3(0.0f, 0.0f, 0.0f);
@@ -145,6 +162,18 @@ __global__ void dose(float* dose_grid,
     float res_y_inv = __frcp_rn(resolution_f3.y);
     float res_z_inv = __frcp_rn(resolution_f3.z);
     int max_steps = __float2int_rd(max_kernel_depth_cm / ds_cm);
+    int nx_ny = nx * ny;
+
+    int spectrum_idx = 0;
+    if (spectrum_hardening_enable) {
+        // Precompute spectrum-depth index once per target voxel (branchless clamp, floor)
+        float depth_wet_centre = __ldg(&d_eff_grid[idx]);
+        float depth_bin_f_c = fminf(depth_wet_centre, max_spectrum_depth_cm) * spectrum_depth_res_cm_inv;
+        int spectrum_idx_c = __float2int_rn(depth_bin_f_c);
+        float spectrum_idx_c_f = fminf(fmaxf((float)spectrum_idx_c, 0.0f), (float)max_spectrum_bin);
+        spectrum_idx = __float2int_rn(spectrum_idx_c_f);
+    }
+    int kernel_s_base = spectrum_idx * kernel_depth_stride;
 
 #pragma unroll(1)
     for (int it = 0; it < n_thetas; it++) {
@@ -174,61 +203,74 @@ __global__ void dose(float* dose_grid,
             // direction_f3.z /= mag;
 
             float s = 0.0f; // Distance travelled along ray (cm)
-            float omega_ds = kernel_omegas[ip] * ds_cm;
-            int kernel_base_idx = ip * n_depth_bins;
-            int nx_ny = nx * ny;
+            float omega = kernel_omegas[ip];
+            // float omega_ds = kernel_omegas[ip] * ds_cm;
+            float kernel_value_prev = 0.0f; // Previous cumulative kernel value (initialize to 0 at ray start)
+            
 
             // We have direction and starting position; time to march along ray
             for (int step = 0; step < max_steps; step++) {
 
-                // Map position → voxel indices
+                // Advance position FIRST (we're computing dose at the target, 
+                // accumulated from sources along the ray)
+                position_f3.x += direction_f3.x * ds_cm;
+                position_f3.y += direction_f3.y * ds_cm;
+                position_f3.z += direction_f3.z * ds_cm;
+                s += ds_cm;
+
+                // Map current step position → voxel indices
                 float fx = (position_f3.x - corner_f3.x) * res_x_inv;
                 float fy = (position_f3.y - corner_f3.y) * res_y_inv;
                 float fz = (position_f3.z - corner_f3.z) * res_z_inv;
                 int ix = __float2int_rd(fx);
                 int iy = __float2int_rd(fy);
                 int iz = __float2int_rd(fz);
-                int idx2 = ix + iy * nx + iz * nx_ny;
+                
                 if ((unsigned)ix >= nx || (unsigned)iy >= ny || (unsigned)iz >= nz) {
-                    break; // Ray left grid. Unsigned speedup as negative values wrap to huge unsigned values
+                    break; // Ray left grid
                 }
-                // Accumulate radiological depth
+                
+                int idx2 = ix + iy * nx + iz * nx_ny;
+
+                // Sample density and TERMA at the NEW position (after stepping)
                 float rho = tex3D<float>(density_tex, fx + 0.5f, fy + 0.5f, fz + 0.5f);
                 float terma = __ldg(&terma_grid[idx2]);
-                // float dt_wet = rho * ds_cm;
-                // rad_depth += dt_wet;
 
-                float rho_inv = __frcp_rn(rho);
-                float ds_eff = rho_inv * ds_cm; // cm in water-equivalent space
-                // d_eq += ds_eff;
-                // s += ds_cm;
+                // Compute no-tilt approximation inverse-square law terma rescaling at the new position
+                float d_geo = __ldg(&d_geo_grid[idx2]);
+                terma *= (source_sad / d_geo) * (source_sad / d_geo);
 
-                // Advance a step
-                position_f3.x += direction_f3.x * ds_eff;
-                position_f3.y += direction_f3.y * ds_eff;
-                position_f3.z += direction_f3.z * ds_eff;
-                s += ds_cm;
-
-                // Lookup kernel value corresponding to this radiological depth
-                int depth_idx = __float2int_rz(s * kernel_depth_res_cm_inv);
-                if (depth_idx >= n_depth_bins || s >= max_kernel_depth_cm) {
-                    break; // Beyond end of kernel
+                // Lookup kernel for the interval we just traversed
+                int depth_idx = __float2int_rn(s * kernel_depth_res_cm_inv) - 1;
+                
+                if (depth_idx < 0) {
+                    continue;  // Haven't reached first kernel bin yet
                 }
-                float kernel_value = kernel[kernel_base_idx + depth_idx];
-                float vol = omega_ds * s * s; // Volume of sample sector
-                dose_acc += terma * kernel_value * vol;
-                // if (s >= max_kernel_depth_cm) {
-                //     break;
-                // }
+                
+                if (depth_idx >= n_depth_bins || s >= max_kernel_depth_cm) {
+                    break; // Beyond kernel support
+                }
+
+                int kernel_base = kernel_s_base + ip * kernel_phi_stride;
+                // float kernel_value_curr = kernel[kernel_base + depth_idx];
+                // float kernel_value_diff = kernel_value_curr - kernel_value_prev;
+                // kernel_value_prev = kernel_value_curr;
+                float kernel_value_diff = kernel[kernel_base + depth_idx];
+                
+                // Volume element for this step (using cumulative kernel)
+                float d_r = s * s * s - (s - ds_cm) * (s - ds_cm) * (s - ds_cm);
+                float vol = omega * d_r / 3;
+
+                // // Volume element for this step
+                // float vol = omega_ds * s * s;
+
+                dose_acc += terma * kernel_value_diff * vol;
             }
         }
     }
-    // Compute no-tilt approximation inverse-square law rescaling
-    float d_geo = __ldg(&d_geo_grid[idx]);
-    float no_tilt_rescaling = (source_sad / d_geo) * (source_sad / d_geo);
 
     // Store final dose
-    dose_grid[idx] = dose_acc * no_tilt_rescaling;
+    dose_grid[idx] = dose_acc;
 }
 
 /**
@@ -271,6 +313,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
     pybind11::array_t<int> num_voxels,
     pybind11::array_t<float> corner,
     pybind11::array_t<float> density_grid,
+    pybind11::array_t<float> d_eff_grid,
     pybind11::array_t<float> d_geo_grid,
     pybind11::array_t<float> terma_grid,
     pybind11::array_t<float> mask_grid,
@@ -284,8 +327,12 @@ void map_dose(pybind11::array_t<float> dose_grid,
     pybind11::array_t<float> source_v_y,
     pybind11::array_t<float> source_v_z,
     int n_depth_bins,
+    int n_spectrum_depth_bins,
     float kernel_depth_res_cm,
     float max_kernel_depth_cm,
+    float spectrum_depth_res_cm,
+    float max_spectrum_depth_cm,
+    bool spectrum_hardening_enable,
     float ds_cm)
 {
     pybind11::buffer_info dose_grid_info = dose_grid.request();
@@ -293,6 +340,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
     pybind11::buffer_info num_voxels_info = num_voxels.request();
     pybind11::buffer_info corner_info = corner.request();
     pybind11::buffer_info density_grid_info = density_grid.request();
+    pybind11::buffer_info d_eff_grid_info = d_eff_grid.request();
     pybind11::buffer_info d_geo_grid_info = d_geo_grid.request();
     pybind11::buffer_info terma_grid_info = terma_grid.request();
     pybind11::buffer_info mask_grid_info = mask_grid.request();
@@ -310,6 +358,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
     int* num_voxels_ptr = reinterpret_cast<int*>(num_voxels_info.ptr);
     float* corner_ptr = reinterpret_cast<float*>(corner_info.ptr);
     float* density_grid_ptr = reinterpret_cast<float*>(density_grid_info.ptr);
+    float* d_eff_grid_ptr = reinterpret_cast<float*>(d_eff_grid_info.ptr);
     float* d_geo_grid_ptr = reinterpret_cast<float*>(d_geo_grid_info.ptr);
     float* terma_grid_ptr = reinterpret_cast<float*>(terma_grid_info.ptr);
     float* mask_grid_ptr = reinterpret_cast<float*>(mask_grid_info.ptr);
@@ -323,7 +372,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
     float* source_v_z_ptr = reinterpret_cast<float*>(source_v_z_info.ptr);
 
     // Allocate device memory and copy inputs
-    float *d_dose_grid, *d_resolution, *d_corner, *d_d_geo_grid; //, *d_density_grid;
+    float *d_dose_grid, *d_resolution, *d_corner, *d_d_eff_grid, *d_d_geo_grid; //, *d_density_grid;
     float *d_terma_grid, *d_mask_grid;
     float *d_kernel_thetas, *d_kernel_phis, *d_kernel_omegas, *d_kernel;
     float *d_source_position, *d_source_v_x, *d_source_v_y, *d_source_v_z;
@@ -333,6 +382,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
     cudaMalloc(&d_num_voxels, num_voxels_info.size * sizeof(int));
     cudaMalloc(&d_corner, corner_info.size * sizeof(float));
     // cudaMalloc(&d_density_grid, density_grid_info.size * sizeof(float));
+    cudaMalloc(&d_d_eff_grid, d_eff_grid_info.size * sizeof(float));
     cudaMalloc(&d_d_geo_grid, d_geo_grid_info.size * sizeof(float));
     cudaMalloc(&d_terma_grid, terma_grid_info.size * sizeof(float));
     cudaMalloc(&d_mask_grid, mask_grid_info.size * sizeof(float));
@@ -349,6 +399,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
     cudaMemcpy(d_num_voxels, num_voxels_ptr, num_voxels_info.size * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_corner, corner_ptr, corner_info.size * sizeof(float), cudaMemcpyHostToDevice);
     // cudaMemcpy(d_density_grid, density_grid_ptr, density_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_d_eff_grid, d_eff_grid_ptr, d_eff_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_d_geo_grid, d_geo_grid_ptr, d_geo_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_terma_grid, terma_grid_ptr, terma_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_mask_grid, mask_grid_ptr, mask_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
@@ -372,10 +423,11 @@ void map_dose(pybind11::array_t<float> dose_grid,
         (num_voxels_ptr[2] + dimBlock.z - 1) / dimBlock.z);
 
     dose<<<dimGrid, dimBlock>>>(d_dose_grid, d_resolution, d_num_voxels, d_corner,
-        density_tex, d_d_geo_grid, d_terma_grid, d_mask_grid,
+        density_tex, d_d_eff_grid, d_d_geo_grid, d_terma_grid, d_mask_grid,
         d_kernel_thetas, d_kernel_phis, d_kernel_omegas, d_kernel,
         source_sad, d_source_position, d_source_v_x, d_source_v_y, d_source_v_z,
-        n_depth_bins, kernel_depth_res_cm, max_kernel_depth_cm, ds_cm);
+        n_depth_bins, n_spectrum_depth_bins, kernel_depth_res_cm, max_kernel_depth_cm,
+        spectrum_depth_res_cm, max_spectrum_depth_cm, spectrum_hardening_enable, ds_cm);
 
     // cudaDeviceSynchronize();
 
@@ -388,7 +440,7 @@ void map_dose(pybind11::array_t<float> dose_grid,
     cudaFree(d_resolution);
     cudaFree(d_num_voxels);
     cudaFree(d_corner);
-    // cudaFree(d_density_grid);
+    cudaFree(d_d_eff_grid);
     cudaFree(d_d_geo_grid);
     cudaFree(d_terma_grid);
     cudaFree(d_mask_grid);

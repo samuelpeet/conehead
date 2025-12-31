@@ -9,6 +9,7 @@ and describe energy deposition as a function of angle and radiological depth.
 
 import numpy as np
 from importlib.resources import files
+from conehead.nist import mu_water
 
 
 class KernelMono:
@@ -132,6 +133,10 @@ class KernelMono:
             # Normalize so kernel integrates to 1
             self.kernel = self.kernel / self.kernel.sum()
 
+        # Compute cumulative kernel along depth axis
+        # kernel_cum[i, j] = integral of differential kernel from depth 0 to j
+        self.kernel_cum = np.cumsum(self.kernel, axis=1)
+
 
 class Kernel:
     """
@@ -149,10 +154,22 @@ class Kernel:
         Azimuthal angle samples (degrees). Default is 16 evenly-spaced
         angles from 0 to 360 (exclusive of 360).
     values : ndarray, shape (n_phis, n_depths)
-        Combined poly-energetic kernel values, normalized to integrate to 1.
-        Accounts for theta sampling by dividing by the number of theta bins.
+        Combined poly-energetic kernel values at the surface (depth 0),
+        normalized to integrate to 1 and divided by theta sampling.
     omegas : ndarray
         Solid angle weights per phi bin, adjusted for theta sampling.
+    values_depth : ndarray, shape (n_depth_bins_depth, n_phis, n_depths)
+        Depth-dependent cumulative poly-energetic kernel table. First axis corresponds
+        to water-equivalent depth from source to interaction site. Cumulative kernels
+        should be sampled via difference: delta_dose = kernel[depth_i] - kernel[depth_i-1].
+    values_depth_diff : ndarray, shape (n_depth_bins_depth, n_phis, n_depths)
+        Depth-dependent differential (original) poly-energetic kernel table.
+    spectrum_depth_res_cm : float
+        Resolution of the depth-dependent spectrum bins (cm).
+    max_spectrum_depth_cm : float
+        Maximum water-equivalent depth captured in the spectrum bins (cm).
+    n_spectrum_depth_bins : int
+        Number of depth bins along the spectrum-hardening axis.
 
     Parameters
     ----------
@@ -173,7 +190,7 @@ class Kernel:
     ensure correct integration over the full solid angle.
     """
 
-    def __init__(self, settings: dict) -> None:
+    def __init__(self, field_size: float, settings: dict) -> None:
         # Load mono-energetic kernels for 0.5 MeV to 6.0 MeV (12 kernels)
         kernels = [
             KernelMono(files("conehead.kernels").joinpath("0.5MeV/0.5MeV.egslst")),
@@ -190,28 +207,61 @@ class Kernel:
             KernelMono(files("conehead.kernels").joinpath("6.0MeV/6.0MeV.egslst")),
         ]
 
-        # Combine kernels weighted by energy spectrum
-        kernel = np.zeros_like(kernels[0].kernel, dtype=np.float32)
-        for i in range(len(settings["energy_spectrum"]["energies"])):
-            kernel += (
-                kernels[i].kernel
-                * settings["energy_spectrum"]["weights"][i]
-                * settings["energy_spectrum"]["energies"][i]
-            )
-        kernel = kernel / kernel.sum()  # Normalize to integrate to 1
+        # Interpolate energy spectrum weights based on field size
+        energies = np.asarray(settings["energy_spectrum"]["energies"], dtype=np.float32)
+        weights_3 = np.asarray(settings["energy_spectrum"]["weights_3"], dtype=np.float32)
+        weights_10 = np.asarray(settings["energy_spectrum"]["weights_10"], dtype=np.float32)
+        weights_40 = np.asarray(settings["energy_spectrum"]["weights_40"], dtype=np.float32)
+        self.weights = np.zeros_like(energies, dtype=np.float32)
+        for i in range(len(energies)):
+            self.weights[i] = np.interp(field_size, [3, 10, 40], [weights_3[i], weights_10[i], weights_40[i]])
+        print(self.weights)
+        mu_w = mu_water(energies).astype(np.float32)
 
-        # Store phi (polar) angles and values
+        spectrum_depth_res_cm = np.float32(0.2)
+        max_spectrum_depth_cm = np.float32(30.0)
+        spectrum_depths = np.arange(
+            0.0,
+            max_spectrum_depth_cm + spectrum_depth_res_cm * 0.5,
+            spectrum_depth_res_cm,
+            dtype=np.float32,
+        )
+
+        # Store phi (polar) angles and allocate depth-dependent kernel table
         self.phis = kernels[0].angles_centres
+        theta_count = 16.0
+        self.thetas = np.linspace(0, 360 - (360 / theta_count), int(theta_count), dtype=np.float32)
+        self.omegas = kernels[0].omegas.astype(np.float32) / theta_count
 
-        # Azimuthal (theta) sampling: 16 evenly-spaced angles around cone axis
-        self.thetas = np.linspace(0, 360 - (360 / 16), 16, dtype=np.float32)
+        values_depth = np.zeros(
+            (len(spectrum_depths), kernels[0].kernel.shape[0], kernels[0].kernel.shape[1]),
+            dtype=np.float32,
+        )
 
-        # Account for theta sampling in kernel values and solid angle weights
-        self.values = kernel / len(self.thetas)
-        self.omegas = (kernels[0].omegas / len(self.thetas)).astype(np.float32)
+        # Compute spectrum-hardened kernels at each depth
+        for depth_idx, depth_cm in enumerate(spectrum_depths):
+            attenuated_weights = self.weights * np.exp(-mu_w * depth_cm)
+            attenuated_weights /= attenuated_weights.sum()
+            # Combine differential kernels spectrally
+            combined_diff = np.zeros_like(kernels[0].kernel, dtype=np.float32)
+            for i in range(len(energies)):
+                combined_diff += kernels[i].kernel * attenuated_weights[i] * energies[i]
+            combined_diff /= combined_diff.sum()
+            values_depth[depth_idx] = combined_diff #/ theta_count
 
-        # Store depth binning info
+        # Compute cumulative kernels from differential
+        values_depth_cum = np.cumsum(values_depth, axis=2)  # Cumsum along depth axis (axis 2)
+        
+        # Expose both differential and cumulative kernel tables
+        self.values_depth_diff = values_depth.astype(np.float32)  # Differential kernels
+        self.values_depth = values_depth_cum.astype(np.float32)   # Cumulative kernels
+        self.values = self.values_depth[0]  # Legacy surface slice (cumulative at spectrum depth 0)
+
+        # Store binning info
         self.n_depth_bins = np.int32(1192)
         self.kernel_depth_res_cm = np.float32(0.05)
         self.max_kernel_depth_cm = np.float32(59.6)
         self.ds_cm = np.float32(0.05)
+        self.spectrum_depth_res_cm = spectrum_depth_res_cm
+        self.max_spectrum_depth_cm = spectrum_depths[-1]
+        self.n_spectrum_depth_bins = np.int32(len(spectrum_depths))

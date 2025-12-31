@@ -27,7 +27,8 @@ settings = toml.load("Truebeam_6FFF_M120.toml")
 # Load CT/Structure Set and Plan
 # dicom_dir = "Prostate Wedge"
 # dicom_dir = "3DCRT 6FFF"
-dicom_dir = "10"
+# dicom_dir = "10"
+dicom_dir = "Output Factors 6FFF"
 # dicom_dir = "MLC Fields 6FFF"
 exam = Exam(dicom_dir=f"{dicom_dir}", hu_lut_path="Siemens_Confidence.toml")
 plan = Plan(dicom_dir=f"{dicom_dir}")

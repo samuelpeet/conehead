@@ -49,8 +49,13 @@ def calculate(
         calculated dose values in the grid's world units.
     """
 
+    # Calculate equivalent square field size for kernel and output factor correction
+    x_gap = np.abs(jaw_x_positions[1] - jaw_x_positions[0])
+    y_gap = np.abs(jaw_y_positions[1] - jaw_y_positions[0])
+    equiv_square = 2 * x_gap * y_gap / (x_gap + y_gap)
+
     # Initialise the dose calculation kernel (precomputes kernel tables)
-    kernel = Kernel(settings=settings)
+    kernel = Kernel(field_size=equiv_square, settings=settings)
 
     # Allocate GPU buffers
     oad_grid = np.zeros_like(grid.values, dtype=np.float32)
@@ -186,7 +191,7 @@ def calculate(
         num_voxels=grid.num_voxels,
         num_energies=np.int32(len(settings["energy_spectrum"]["energies"])),
         energies=np.array(settings["energy_spectrum"]["energies"], dtype=np.float32),
-        energy_weights=np.array(settings["energy_spectrum"]["weights"], dtype=np.float32),
+        energy_weights=kernel.weights,
         mu_w=mu_water(np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)),
         source_sad=source.sad,
         oad_grid=oad_grid,
@@ -195,6 +200,17 @@ def calculate(
         ),
         off_axis_softening_dx=np.float32(40.0),
     )
+
+
+
+    # ds = [0.1 + 0.2 * x for x in range(201)]
+    # plt.plot(ds, terma_grid[grid.num_voxels[2]//2, :, grid.num_voxels[0]//2])
+
+    # terma_grid = np.zeros_like(grid.values, dtype=np.float32)
+    # terma_grid[grid.num_voxels[2]//2, :, grid.num_voxels[0]//2] = np.float32(1.0)
+
+
+
     if settings["calculation"]["terma_mask_enable"]:
         gpu.mask(
             mask_grid=mask_grid,
@@ -209,34 +225,59 @@ def calculate(
     else:
         mask_grid.fill(1.0)
 
+
     gpu.dose(
         dose_grid=dose_grid,
         resolution=grid.resolution,
         num_voxels=grid.num_voxels,
         corner=grid.corner,
         density_grid=density_grid,
+        d_eff_grid=d_eff_grid,
         d_geo_grid=d_geo_grid,
         terma_grid=terma_grid,
         mask_grid=mask_grid,
         kernel_thetas=kernel.thetas,
         kernel_phis=kernel.phis,
         kernel_omegas=kernel.omegas,
-        kernel=kernel.values,
+        kernel=kernel.values_depth_diff,
         source_sad=source.sad,
         source_position=source.position,
         source_v_x=source.v_x,
         source_v_y=source.v_y,
         source_v_z=source.v_z,
         n_depth_bins=kernel.n_depth_bins,
+        n_spectrum_depth_bins=kernel.n_spectrum_depth_bins,
         kernel_depth_res_cm=kernel.kernel_depth_res_cm,
         max_kernel_depth_cm=kernel.max_kernel_depth_cm,
+        spectrum_depth_res_cm=kernel.spectrum_depth_res_cm,
+        max_spectrum_depth_cm=kernel.max_spectrum_depth_cm,
+        spectrum_hardening_enable=settings["calculation"]["spectrum_hardening_enable"],
         ds_cm=kernel.ds_cm,
     )
 
+    
+
+    # # Rescale terma grid for no-tilt approximation comparison
+    # terma_grid_rescaled = terma_grid * (100.0 / d_geo_grid) * (100.0 / d_geo_grid)
+    # fig, ax = plt.subplots(2, 2, figsize=(12, 12))
+    # ax[0, 0].imshow(fluence_grid[grid.num_voxels[2]//2, :, :])
+    # ax[0, 1].imshow(terma_grid_rescaled[grid.num_voxels[2]//2, :, :])
+    # ax[1, 0].imshow(dose_grid[grid.num_voxels[2]//2, :, :])
+    # # ax[1, 0].imshow(np.log10(dose_grid[grid.num_voxels[2]//2, :, :]))
+    # # ax[1, 0].set_xlim([90, 110])
+    # # ax[1, 0].set_ylim([90, 110])
+    # ds = [0.1 + 0.2 * x for x in range(grid.num_voxels[2])]
+    # hl = grid.num_voxels[2]//2
+    # ax[1, 1].plot(ds, fluence_grid[hl, :, hl]/fluence_grid[hl, :, hl].max(), label='Fluence')
+    # ax[1, 1].plot(ds, terma_grid_rescaled[hl, :, hl]/terma_grid_rescaled[hl, :, hl].max(), label='Terma')
+    # ax[1, 1].plot(ds, dose_grid[hl, :, hl]/dose_grid[hl, :, hl].max(), label='Dose')
+    # ax[1, 1].legend()
+    # ax[1, 1].grid('both')
+    # plt.show()
+
+
+
     # Apply output factor correction and normalisation
-    x_gap = np.abs(jaw_x_positions[1] - jaw_x_positions[0])
-    y_gap = np.abs(jaw_y_positions[1] - jaw_y_positions[0])
-    equiv_square = 2 * x_gap * y_gap / (x_gap + y_gap)
     ofc = np.interp(
         equiv_square,
         settings["output_factor_correction"]["field_sizes"],

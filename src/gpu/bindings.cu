@@ -32,9 +32,11 @@ PYBIND11_MODULE(conehead_gpu, m)
     m.def("mask", &map_mask, py::arg("mask_grid"), py::arg("terma_grid"), py::arg("num_voxels"),
         py::arg("resolution"), py::arg("max_distance_cm"), py::arg("terma_threshold"));
     m.def("dose", &map_dose, py::arg("dose_grid"), py::arg("resolution"), py::arg("num_voxels"), py::arg("corner"),
-        py::arg("density_grid"), py::arg("d_geo_grid"), py::arg("terma_grid"),
+        py::arg("density_grid"), py::arg("d_eff_grid"), py::arg("d_geo_grid"), py::arg("terma_grid"),
         py::arg("mask_grid"), py::arg("kernel_thetas"), py::arg("kernel_phis"),
         py::arg("kernel_omegas"), py::arg("kernel"), py::arg("source_sad"), py::arg("source_position"),
         py::arg("source_v_x"), py::arg("source_v_y"), py::arg("source_v_z"),
-        py::arg("n_depth_bins"), py::arg("kernel_depth_res_cm"), py::arg("max_kernel_depth_cm"), py::arg("ds_cm"));
+        py::arg("n_depth_bins"), py::arg("n_spectrum_depth_bins"), py::arg("kernel_depth_res_cm"),
+        py::arg("max_kernel_depth_cm"), py::arg("spectrum_depth_res_cm"), py::arg("max_spectrum_depth_cm"),
+        py::arg("spectrum_hardening_enable"), py::arg("ds_cm"));
 }

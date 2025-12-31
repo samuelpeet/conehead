@@ -97,7 +97,7 @@ def run(fs, grid, exam, settings):
     block = Block(settings=settings)
     block.set_square(fs)
     fluence_map_pri, fluence_map_sec = block.get_fluence_maps()
-    dose = Grid(corner=grid.corner, resolution=grid.resolution, num_voxels=grid.num_voxels)
+    dose = Grid(corner=grid.corner, resolution=grid.resolution, num_voxels=grid.num_voxels)    
     dose.values += calculate(  # type: ignore
         grid,
         source,
@@ -114,13 +114,13 @@ def run(fs, grid, exam, settings):
 def calculate_doses(fss, exam, settings):
     # Calculate conehead doses for a range of field sizes
     grid = Grid(
-        corner=np.array([-30.1, 0, -30.1], dtype=np.float32),
+        corner=np.array([-28.1, 0, -28.1], dtype=np.float32),
         resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
-        num_voxels=np.array([301, 201, 301], dtype=np.int32),
+        num_voxels=np.array([281, 281, 281], dtype=np.int32),
     )
     calc = {}
     for fs in fss:
-        print(f"Running field: {fs}")
+        # print(f"Running field: {fs}")
         calc[fs] = {}
         calc[fs]["dose"] = run(fs, grid, exam, settings)
         calc[fs][
@@ -132,7 +132,7 @@ def calculate_doses(fss, exam, settings):
         ]
         calc[fs]["pdd"] = [
             ds,
-            calc[fs]["dose"].values[grid.num_voxels[1] // 2, :, grid.num_voxels[1] // 2],
+            calc[fs]["dose"].values[grid.num_voxels[2] // 2, :, grid.num_voxels[0] // 2],
         ]
         xs = [
             grid.corner[0] + grid.resolution[0] / 2 + x * grid.resolution[0]
@@ -193,7 +193,8 @@ def difference_in_pdds(calc, gold):
         calc_pdd_interp = np.interp(
             gold[fs]["pdd"][0], calc[fs]["pdd"][0], calc[fs]["pdd"][1] / calc[fs]["pdd"][1].max()
         )
-        gold_pdd = gold[fs]["pdd"][1]
+        # calc_pdd_interp = calc_pdd_interp / calc_pdd_interp[100] 
+        gold_pdd = gold[fs]["pdd"][1] / gold[fs]["pdd"][1].max()
 
         # Clip off approximate build-up region
         calc_pdd_interp = calc_pdd_interp[10:]
@@ -207,38 +208,52 @@ def optimise_pdd(x, exam, gold):
     # Update settings with new energy spectrum
     settings = toml.load("Truebeam_6FFF_M120.toml")
     energies = np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)
+
+    # c1 = x[0]
+    # c2 = x[1]
+    # energy_weights = energies ** (c1) * np.exp(-c2 * energies)
+    # N = np.sum(energy_weights)
+    # energy_weights /= N
+    # energy_weights /= energies
+    # settings["energy_spectrum"]["weights"] = energy_weights.tolist()
+
+    # mu = x[0]
+    # sigma = x[1]
+    # energy_weights = 1 / (np.sqrt(2 * np.pi) * sigma * energies)
+    # energy_weights *= np.exp(-((-np.log(energies) - mu) ** 2) / (2 * sigma**2))
+    
     energy_weights = np.array(
-        [x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], 0.0, x[8], 0.0, x[9]], dtype=np.float32
+        [x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11]], dtype=np.float32
     )
     N = np.sum(energy_weights)
     energy_weights /= N
-    energy_weights /= energies
+    energy_weights *= energies
     settings["energy_spectrum"]["weights"] = energy_weights.tolist()
 
     # Calc doses
-    fss = [3, 10, 40]
+    fss = [40] #[3, 10, 40]
     calc = calculate_doses(fss, exam, settings)
+    # fig, ax = plt.subplots(1, 1, figsize=(12, 9))
+    # for fs in fss:
+    #     ax.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1] / gold[fs]["pdd"][1].max(), label="Measured PDD")
+    #     ax.plot(
+    #         calc[fs]["pdd"][0], calc[fs]["pdd"][1] / calc[fs]["pdd"][1].max(), ".", label="Conehead PDD"
+    #     )
+    #     ax.set_xlabel("Depth (cm)")
+    #     ax.set_ylabel("Relative Dose")
+    #     ax.legend()
+    # plt.show()
     diff = difference_in_pdds(calc, gold)
-    print(f"params: {x}, Diff: {diff}")
-    return diff
+    print(f"params: {x}\nDiff: {diff*100}")
+    return diff * 100
 
 
 # %%
 # Optimising energy spectrum
 gold = import_gold_beam_data()
 exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
-x0 = [
-    0.13077393,
-    0.08785954,
-    0.0294463,
-    0.04815249,
-    0.03111974,
-    0.43969824,
-    0.03215145,
-    0.0169554,
-    0.03014422,
-    0.022631,
-]
+x0 = [6.37866626e-01, 5.24930987e-02, 1.02095518e-01, 3.23278437e-05, 2.71260518e-02, 8.53287051e-03, 4.25837066e-05, 0.00000000e+00, 1.22616270e-03, 6.78531340e-04, 2.59861780e-04, 3.32664982e-05]
+
 bounds = [
     (0.0, 1.0),
     (0.0, 1.0),
@@ -250,38 +265,50 @@ bounds = [
     (0.0, 1.0),
     (0.0, 1.0),
     (0.0, 1.0),
+    (0.0, 1.0),
+    (0.0, 1.0)
 ]
+# x0 = [0.3, 0.9]
+# bounds = [(0.001, 2.0), (0.001, 2.0)]
 result = minimize(optimise_pdd, x0, args=(exam, gold), method="Nelder-Mead", bounds=bounds)
 
 # %%
 # Plot PDDs
 # x = [0.11815628, 0.07121678, 0.14556541, 0.09402617, 0.10339564, 0.09395615, 0.07655023, 0.11007001, 0.0512248, 0.0117276]
-x = [
-    0.13077393,
-    0.08785954,
-    0.0294463,
-    0.04815249,
-    0.03111974,
-    0.43969824,
-    0.03215145,
-    0.0169554,
-    0.03014422,
-    0.022631,
-]
+x_3 = [9.78887112e-01, 5.06918312e-03, 1.80647223e-03, 1.35677832e-04, 4.02326888e-02, 2.48797532e-02, 5.64411258e-05, 4.50911833e-05, 2.54285319e-03, 3.81893355e-04, 9.19434324e-06, 2.01442085e-05]
+x_10 = [6.37866626e-01, 5.24930987e-02, 1.02095518e-01, 3.23278437e-05, 2.71260518e-02, 8.53287051e-03, 4.25837066e-05, 0.00000000e+00, 1.22616270e-03, 6.78531340e-04, 2.59861780e-04, 3.32664982e-05]
+x_40 = [3.11421911e-01, 6.85822548e-02, 2.12540862e-01, 3.23181680e-05, 5.48393311e-03, 1.93255940e-03, 3.55081544e-05, 0.00000000e+00, 2.96541822e-04, 2.79249071e-06, 3.87204832e-04, 2.59697551e-05]
+x = x_40
+
 settings = toml.load("Truebeam_6FFF_M120.toml")
 energies = np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)
+
 energy_weights = np.array(
-    [x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], 0.0, x[8], 0.0, x[9]], dtype=np.float32
+    [x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11]], dtype=np.float32
 )
+# mu = x[0]
+# sigma = x[1]
+# energy_weights = 1 / (np.sqrt(2 * np.pi) * sigma * energies)
+# energy_weights *= np.exp(-((np.log(energies) - mu) ** 2) / (2 * sigma**2))
+# e_ave = x[0]
+# e_mp = x[1]
+# c1 = e_ave / (e_ave - e_mp)
+# c2 = 1 / (e_ave - e_mp)
+# c1 = x[0]
+# c2 = x[1]
+# energy_weights = energies ** (c1) * np.exp(-c2 * energies)
+# energy_weights *= energies
+
 N = np.sum(energy_weights)
 energy_weights /= N
-energy_weights /= energies
+energy_weights *= energies
+
 settings["energy_spectrum"]["weights"] = energy_weights.tolist()
 fss = [3, 10, 40]
 calc = calculate_doses(fss, exam, settings)
 fig, ax = plt.subplots(1, 1, figsize=(16, 9))
 for fs in fss:
-    ax.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1], label="Measured PDD")
+    ax.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1]/gold[fs]["pdd"][1].max(), label="Measured PDD")
     ax.plot(
         calc[fs]["pdd"][0], calc[fs]["pdd"][1] / calc[fs]["pdd"][1].max(), ".", label="Conehead PDD"
     )
@@ -297,8 +324,8 @@ def calculate_normalisation():
     settings["calculation"]["normalisation"] = np.float32(1.0)
     calc = calculate_doses([10], exam, settings)
     d_max = np.argmax(calc[10]["pdd"][1])
-    calc_dose_at_10cm = calc[10]["pdd"][1][d_max]
-    normalisation = 1 / calc_dose_at_10cm
+    calc_dose_at_dmax = calc[10]["pdd"][1][d_max]
+    normalisation = 1 / calc_dose_at_dmax
     return normalisation
 
 
@@ -412,5 +439,24 @@ bounds = [
 ]
 result = minimize(optimise_bpc, x0, args=(exam, gold), method="Nelder-Mead", bounds=bounds)
 
+
+# %%
+settings = toml.load("Truebeam_6FFF_M120.toml")
+exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
+fig, ax = plt.subplots(1, 1, figsize=(16, 12))
+# gold = import_gold_beam_data()
+for i in [(0, 0.5), (1, 1.0), (3, 2.0), (7, 4.0), (11, 6.0)]:
+    energy_weights = np.zeros(12, dtype=np.float32)
+    energy_weights[i[0]] = 1.0
+    settings["energy_spectrum"]["weights"] = energy_weights.tolist()
+    fs = 20
+    calc = calculate_doses([fs], exam, settings)
+    # ax.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1] / gold[fs]["pdd"][1][100], label="Measured PDD")
+
+    ax.plot(
+        calc[fs]["pdd"][0], calc[fs]["pdd"][1] / calc[fs]["pdd"][1].max(), label=f"{i[1]} MeV"
+    )
+ax.legend()
+ax.grid()
 
 # %%
