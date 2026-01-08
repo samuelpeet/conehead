@@ -115,7 +115,7 @@ __global__ void dose(float* dose_grid,
         corner_f3.z + resolution_f3.z * (z + 0.5));
 
     // Outside external/support structures
-    if (tex3D<float>(density_tex, centre_f3.x, centre_f3.y, centre_f3.z) == 0.0f) {
+    if (tex3D<float>(density_tex, x + 0.5f, y + 0.5f, z + 0.5f) == 0.0f) {
         // Skip convolution for this voxel
         dose_grid[idx] = 0.0f;
         return;
