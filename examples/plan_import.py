@@ -22,13 +22,13 @@ from conehead.calculate import calculate
 
 # Load machine settings
 t_start = time.perf_counter()
-settings = toml.load("Truebeam_6FFF_M120.toml")
+settings = toml.load("Truebeam_6_M120.toml")
 
 # Load CT/Structure Set and Plan
-# dicom_dir = "Prostate Wedge"
+dicom_dir = "Prostate Wedge"
 # dicom_dir = "3DCRT 6FFF"
-# dicom_dir = "10"
-dicom_dir = "Output Factors 6FFF"
+# dicom_dir = "40"
+# dicom_dir = "PROSTATE VMAT"
 # dicom_dir = "MLC Fields 6FFF"
 exam = Exam(dicom_dir=f"{dicom_dir}", hu_lut_path="Siemens_Confidence.toml")
 plan = Plan(dicom_dir=f"{dicom_dir}")
@@ -41,16 +41,16 @@ print(f"⏱️  Loading data: {t_load - t_start:.3f}s")
 #     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
 #     num_voxels=np.array([213, 213, 215], dtype=np.int32),
 # )
-# grid = Grid(
-#     corner=np.array([-26.95665, -23.1248, -10.2], dtype=np.float32),
-#     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
-#     num_voxels=np.array([267, 206, 138], dtype=np.int32),
-# )
 grid = Grid(
-    corner=np.array([-20, 0, -20], dtype=np.float32),
-    resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
-    num_voxels=np.array([200, 200, 200], dtype=np.int32),
+    corner=np.array([-20, -10, -10], dtype=np.float32),
+    resolution=np.array([0.4, 0.4, 0.4], dtype=np.float32),
+    num_voxels=np.array([100, 50, 50], dtype=np.int32),
 )
+# grid = Grid(
+#     corner=np.array([-28.1, 0, -28.1], dtype=np.float32),
+#     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
+#     num_voxels=np.array([281, 281, 281], dtype=np.int32),
+# )
 
 
 t_beam_start = time.perf_counter()
@@ -76,8 +76,17 @@ for beam in plan.beams:
         # Initalise the block and compute the fluence maps
         t_fluence_start = time.perf_counter()
         block = Block(control_point=cp, settings=settings)
+        # block = Block(settings=settings)
+        # block.set_square(20)
         fluence_map_pri, fluence_map_sec = block.get_fluence_maps()
         t_fluence_end = time.perf_counter()
+
+
+        print(grid.num_voxels, grid.resolution, grid.corner)
+        print(source.gantry, source.collimator, source.position, source.isocenter)
+        print(cp.jaw_x_positions, cp.jaw_y_positions)
+
+
 
         # Pass everything through to the dose calculation function
         print(f"Calculating beam: {beam.name}")
@@ -150,6 +159,7 @@ for beam in plan.beams:
         # each sector to get a representative control point for that sector. We then calculate the
         # dose from this sector.
         for i, sector in enumerate(sectors):
+            print(f"Calculating sector {i + 1}/{len(sectors)} with {len(sector)} control points")
             # Calculate the total meterset weight for the sector
             sector_meterset_weight = sector[-1].cum_meterset_weight - sector[0].cum_meterset_weight
             # Combine the control points in the sector into a single Block weighted by relative
@@ -159,7 +169,13 @@ for beam in plan.beams:
                 cp_block = Block(settings=settings, control_point=cp)
                 rel_weight = cp.diff_meterset_weight / sector_meterset_weight
                 sector_block.values += cp_block.values * rel_weight
+                sector_block.wedge_angle = None
             fluence_map_pri, fluence_map_sec = sector_block.get_fluence_maps()
+
+            fig, ax = plt.subplots(1, 2)
+            ax[0].imshow(fluence_map_pri, cmap="plasma")
+            ax[1].imshow(fluence_map_sec, cmap="plasma")
+            plt.show()
 
             # Calculate representative gantry angle for the sector (middle of start and end angles)
             sector_start_angle = (sector[0].gantry + 180.0) % 360.0
@@ -178,9 +194,11 @@ for beam in plan.beams:
             jaw_x_positions = np.array([x1, x2], dtype=np.float32)
             jaw_y_positions = np.array([y1, y2], dtype=np.float32)
 
+            print(jaw_x_positions, jaw_y_positions, source.gantry, source.collimator, source.position, source.isocenter)
+
             # Pass everything through to the dose calculation function
             t_sector_start = time.perf_counter()
-            beam.dose.values += calculate(  # type: ignore
+            calc = calculate(  # type: ignore
                 grid,
                 source,
                 fluence_map_pri,
@@ -190,6 +208,14 @@ for beam in plan.beams:
                 jaw_y_positions,
                 settings,
             )
+
+            # fig, ax = plt.subplots(1, 3)
+            # ax[0].imshow(calc[grid.num_voxels[2] // 2, :, :], cmap="plasma")
+            # ax[1].imshow(calc[:, grid.num_voxels[1] // 2, :], cmap="plasma")
+            # ax[2].imshow(calc[:, :, grid.num_voxels[0] // 2], cmap="plasma")
+            # plt.show()
+
+            beam.dose.values += calc
             t_sector_end = time.perf_counter()
             print(f"⏱️  Sector {i + 1}/{len(sectors)}: {t_sector_end - t_sector_start:.3f}s")
             # The calculation for this sector is now complete.

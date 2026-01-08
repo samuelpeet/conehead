@@ -118,6 +118,7 @@ docs/doxygen/xml/
 docs/doxygen/latex/
 
 examples/Prostate*
+examples/PROSTATE*
 examples/Output*
 examples/MLC*
 examples/3DCRT*
