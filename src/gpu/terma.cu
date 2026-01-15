@@ -29,7 +29,8 @@
  * @param[in]  num_energies     Number of spectral energy bins (length of energies/weights arrays).
  * @param[in]  energies         Device pointer to per-bin energy values (float[num_energies]).
  * @param[in]  energy_weights   Device pointer to per-bin normalized weights (float[num_energies]).
- * @param[in]  mu_w             Device pointer to per-bin linear attenuation coefficients (float[num_energies]).
+ * @param[in]  mu_tot           Device pointer to per-bin linear attenuation coefficients (float[num_energies]).
+ * @param[in]  mu_en            Device pointer to per-bin energy absorption coefficients (float[num_energies]).
  * @param[in]  source_sad       Source-to-axis distance used for no-tilt descaling.
  * @param[in]  oad_grid         Device pointer to off-axis-distance grid (nx*ny*nz) for optional off-axis softening (unused here).
  * @param[in]  off_axis_softening_fs_interp Device pointer to LUT for off-axis softening (optional/unused).
@@ -48,7 +49,8 @@ __global__ void terma(float* terma_grid,
     int num_energies,
     float* energies,
     float* energy_weights,
-    float* mu_w,
+    float* mu_tot,
+    float* mu_en,
     float source_sad,
     float* oad_grid,
     float* off_axis_softening_fs_interp,
@@ -90,7 +92,7 @@ __global__ void terma(float* terma_grid,
         for (int i = 0; i < num_energies; i++) {
             float fluence = fluence_grid[idx];
             float d_eff = d_eff_grid[idx] + oas;
-            terma += energy_weights[i] * fluence * expf(-mu_w[i] * d_eff) * mu_w[i] * energies[i];
+            terma += energy_weights[i] * fluence * expf(-mu_tot[i] * d_eff) * mu_en[i] * energies[i];
         }
         float d_geo = d_geo_grid[idx];
         float no_tilt_descaling = (d_geo / source_sad) * (d_geo / source_sad);
@@ -119,7 +121,8 @@ __global__ void terma(float* terma_grid,
  * @param num_energies      Integer: number of spectral bins.
  * @param energies          NumPy array (float32) per-bin energies.
  * @param energy_weights    NumPy array (float32) per-bin weights (should sum to 1).
- * @param mu_w              NumPy array (float32) per-bin linear attenuation coefficients.
+ * @param mu_tot            NumPy array (float32) per-bin linear attenuation coefficients.
+ * @param mu_en             NumPy array (float32) per-bin energy absorption coefficients.
  * @param source_sad        Float: source-to-axis distance used for descaling.
  * @param oad_grid          NumPy array (float32) flattened off-axis distances (optional, can be zeros).
  * @param off_axis_softening_fs_interp NumPy array (float32) LUT for off-axis softening (optional).
@@ -139,7 +142,8 @@ void map_terma(
     int num_energies,
     pybind11::array_t<float> energies,
     pybind11::array_t<float> energy_weights,
-    pybind11::array_t<float> mu_w,
+    pybind11::array_t<float> mu_tot,
+    pybind11::array_t<float> mu_en,
     float source_sad,
     pybind11::array_t<float> oad_grid,
     pybind11::array_t<float> off_axis_softening_fs_interp,
@@ -153,7 +157,8 @@ void map_terma(
     pybind11::buffer_info num_voxels_info = num_voxels.request();
     pybind11::buffer_info energies_info = energies.request();
     pybind11::buffer_info energy_weights_info = energy_weights.request();
-    pybind11::buffer_info mu_w_info = mu_w.request();
+    pybind11::buffer_info mu_tot_info = mu_tot.request();
+    pybind11::buffer_info mu_en_info = mu_en.request();
     pybind11::buffer_info oad_grid_info = oad_grid.request();
     pybind11::buffer_info off_axis_softening_fs_interp_info = off_axis_softening_fs_interp.request();
 
@@ -164,13 +169,14 @@ void map_terma(
     int* num_voxels_ptr = reinterpret_cast<int*>(num_voxels_info.ptr);
     float* energies_ptr = reinterpret_cast<float*>(energies_info.ptr);
     float* energy_weights_ptr = reinterpret_cast<float*>(energy_weights_info.ptr);
-    float* mu_w_ptr = reinterpret_cast<float*>(mu_w_info.ptr);
+    float* mu_tot_ptr = reinterpret_cast<float*>(mu_tot_info.ptr);
+    float* mu_en_ptr = reinterpret_cast<float*>(mu_en_info.ptr);
     float* oad_grid_ptr = reinterpret_cast<float*>(oad_grid_info.ptr);
     float* off_axis_softening_fs_interp_ptr = reinterpret_cast<float*>(off_axis_softening_fs_interp_info.ptr);
 
     // Allocate device memory and copy inputs
     float *d_terma_grid, *d_fluence_grid, *d_d_geo_grid, *d_d_eff_grid;
-    float *d_energies, *d_energy_weights, *d_mu_w, *d_oad_grid, *d_off_axis_softening_fs_interp;
+    float *d_energies, *d_energy_weights, *d_mu_tot, *d_mu_en, *d_oad_grid, *d_off_axis_softening_fs_interp;
     int* d_num_voxels;
     cudaMalloc(&d_terma_grid, terma_grid_info.size * sizeof(float));
     cudaMalloc(&d_fluence_grid, fluence_grid_info.size * sizeof(float));
@@ -179,7 +185,8 @@ void map_terma(
     cudaMalloc(&d_num_voxels, num_voxels_info.size * sizeof(int));
     cudaMalloc(&d_energies, energies_info.size * sizeof(float));
     cudaMalloc(&d_energy_weights, energy_weights_info.size * sizeof(float));
-    cudaMalloc(&d_mu_w, mu_w_info.size * sizeof(float));
+    cudaMalloc(&d_mu_tot, mu_tot_info.size * sizeof(float));
+    cudaMalloc(&d_mu_en, mu_en_info.size * sizeof(float));
     cudaMalloc(&d_oad_grid, oad_grid_info.size * sizeof(float));
     cudaMalloc(&d_off_axis_softening_fs_interp, off_axis_softening_fs_interp_info.size * sizeof(float));
     cudaMemcpy(d_terma_grid, terma_grid_ptr, terma_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
@@ -189,7 +196,8 @@ void map_terma(
     cudaMemcpy(d_num_voxels, num_voxels_ptr, num_voxels_info.size * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_energies, energies_ptr, energies_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_energy_weights, energy_weights_ptr, energy_weights_info.size * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_mu_w, mu_w_ptr, mu_w_info.size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_mu_tot, mu_tot_ptr, mu_tot_info.size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_mu_en, mu_en_ptr, mu_en_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_oad_grid, oad_grid_ptr, oad_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_off_axis_softening_fs_interp, off_axis_softening_fs_interp_ptr, off_axis_softening_fs_interp_info.size * sizeof(float), cudaMemcpyHostToDevice);
 
@@ -209,7 +217,8 @@ void map_terma(
         num_energies,
         d_energies,
         d_energy_weights,
-        d_mu_w,
+        d_mu_tot,
+        d_mu_en,
         source_sad,
         d_oad_grid,
         d_off_axis_softening_fs_interp,
@@ -228,7 +237,8 @@ void map_terma(
     cudaFree(d_num_voxels);
     cudaFree(d_energies);
     cudaFree(d_energy_weights);
-    cudaFree(d_mu_w);
+    cudaFree(d_mu_tot);
+    cudaFree(d_mu_en);
     cudaFree(d_oad_grid);
     cudaFree(d_off_axis_softening_fs_interp);
 }

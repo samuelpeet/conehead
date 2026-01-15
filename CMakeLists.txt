@@ -17,6 +17,7 @@ pybind11_add_module(
     src/gpu/d_eff.cu
     src/gpu/fluence.cu
     src/gpu/terma.cu
+    src/gpu/terma_spectral.cu
     src/gpu/mask.cu
     src/gpu/dose.cu
     src/gpu/bindings.cu

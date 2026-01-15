@@ -130,4 +130,5 @@ examples/10*
 examples/20*
 examples/30*
 examples/40*
+examples/slab*
 *.DS_Store

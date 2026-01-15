@@ -115,7 +115,8 @@ __global__ void dose(float* dose_grid,
         corner_f3.z + resolution_f3.z * (z + 0.5));
 
     // Outside external/support structures
-    if (tex3D<float>(density_tex, x + 0.5f, y + 0.5f, z + 0.5f) == 0.0f) {
+    float density = tex3D<float>(density_tex, x + 0.5f, y + 0.5f, z + 0.5f);
+    if (density == 0.0f) {
         // Skip convolution for this voxel
         dose_grid[idx] = 0.0f;
         return;
@@ -180,8 +181,6 @@ __global__ void dose(float* dose_grid,
 #pragma unroll(1)
         for (int ip = 0; ip < n_phis; ip++) {
 
-            // float d_eq = 0.0f;
-
             // Initialize ray position at voxel centre
             position_f3.x = centre_f3.x;
             position_f3.y = centre_f3.y;
@@ -196,17 +195,11 @@ __global__ void dose(float* dose_grid,
             direction_f3.y = local_x * svx.y + local_y * svy.y + local_z * svz.y;
             direction_f3.z = local_x * svx.z + local_y * svy.z + local_z * svz.z;
 
-            // // Normalize
-            // float mag = sqrt(direction_f3.x * direction_f3.x + direction_f3.y * direction_f3.y + direction_f3.z * direction_f3.z);
-            // direction_f3.x /= mag;
-            // direction_f3.y /= mag;
-            // direction_f3.z /= mag;
-
-            float s = 0.0f; // Distance travelled along ray (cm)
+            float s = 0.0f; // Geometrtic distance travelled along ray (cm)
+            float rad_depth = 0.0f; // Effective water equivalent distance travelled along ray (cm)
+            float rad_depth_prev = 0.0f;
             float omega = kernel_omegas[ip];
-            // float omega_ds = kernel_omegas[ip] * ds_cm;
             float kernel_value_prev = 0.0f; // Previous cumulative kernel value (initialize to 0 at ray start)
-            
 
             // We have direction and starting position; time to march along ray
             for (int step = 0; step < max_steps; step++) {
@@ -225,44 +218,43 @@ __global__ void dose(float* dose_grid,
                 int ix = __float2int_rd(fx);
                 int iy = __float2int_rd(fy);
                 int iz = __float2int_rd(fz);
-                
                 if ((unsigned)ix >= nx || (unsigned)iy >= ny || (unsigned)iz >= nz) {
                     break; // Ray left grid
                 }
-                
                 int idx2 = ix + iy * nx + iz * nx_ny;
 
                 // Sample density and TERMA at the NEW position (after stepping)
                 float rho = tex3D<float>(density_tex, fx + 0.5f, fy + 0.5f, fz + 0.5f);
+                if(rho == 0.0f) {
+                    continue;
+                }
                 float terma = __ldg(&terma_grid[idx2]);
 
                 // Compute no-tilt approximation inverse-square law terma rescaling at the new position
                 float d_geo = __ldg(&d_geo_grid[idx2]);
                 terma *= (source_sad / d_geo) * (source_sad / d_geo);
 
-                // Lookup kernel for the interval we just traversed
-                int depth_idx = __float2int_rn(s * kernel_depth_res_cm_inv) - 1;
-                
-                if (depth_idx < 0) {
-                    continue;  // Haven't reached first kernel bin yet
-                }
-                
-                if (depth_idx >= n_depth_bins || s >= max_kernel_depth_cm) {
+                // Accumulate radiological depth    
+                rad_depth += rho * ds_cm;                
+                if (rad_depth >= max_kernel_depth_cm) {
                     break; // Beyond kernel support
                 }
 
+                // Lookup kernel index for the interval we just traversed
+                int depth_idx = __float2int_rn(rad_depth * kernel_depth_res_cm_inv) - 1;
+                if (depth_idx < 0) {
+                    continue;  // Haven't reached first kernel bin yet
+                }
                 int kernel_base = kernel_s_base + ip * kernel_phi_stride;
-                // float kernel_value_curr = kernel[kernel_base + depth_idx];
-                // float kernel_value_diff = kernel_value_curr - kernel_value_prev;
-                // kernel_value_prev = kernel_value_curr;
-                float kernel_value_diff = kernel[kernel_base + depth_idx];
-                
-                // Volume element for this step (using cumulative kernel)
-                float d_r = s * s * s - (s - ds_cm) * (s - ds_cm) * (s - ds_cm);
-                float vol = omega * d_r / 3;
+                float kernel_value_curr = kernel[kernel_base + depth_idx];
+                float kernel_value_diff = kernel_value_curr - kernel_value_prev;
+                kernel_value_prev = kernel_value_curr;
+                // float kernel_value_diff = kernel[kernel_base + depth_idx];
 
-                // // Volume element for this step
-                // float vol = omega_ds * s * s;
+                // Volume element for this step (using GEOMETRIC distance)
+                float d_r = (s * s * s) - ((s - ds_cm) * (s - ds_cm) * (s - ds_cm));
+                float vol = omega * d_r / 3.0f;
+                rad_depth_prev = rad_depth;
 
                 dose_acc += terma * kernel_value_diff * vol;
             }

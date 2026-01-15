@@ -25,9 +25,13 @@ t_start = time.perf_counter()
 settings = toml.load("Truebeam_6_M120.toml")
 
 # Load CT/Structure Set and Plan
-dicom_dir = "Prostate Wedge"
+# dicom_dir = "Prostate Wedge"
 # dicom_dir = "3DCRT 6FFF"
-# dicom_dir = "40"
+# dicom_dir = "10"
+# dicom_dir = "10_water_mix"
+# dicom_dir = "slab_bone"
+dicom_dir = "slab_lung"
+# dicom_dir = "slab_soft_tissue"
 # dicom_dir = "PROSTATE VMAT"
 # dicom_dir = "MLC Fields 6FFF"
 exam = Exam(dicom_dir=f"{dicom_dir}", hu_lut_path="Siemens_Confidence.toml")
@@ -37,15 +41,20 @@ print(f"⏱️  Loading data: {t_load - t_start:.3f}s")
 
 # Define grid geometry for dose calculation
 # grid = Grid(
-#     corner=np.array([-21.25, -1.25, -21.6], dtype=np.float32),
+#     corner=np.array([-26.95665, -23.1248, -10.2], dtype=np.float32),
 #     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
-#     num_voxels=np.array([213, 213, 215], dtype=np.int32),
+#     num_voxels=np.array([267, 206, 138], dtype=np.int32),
 # )
 grid = Grid(
-    corner=np.array([-20, -10, -10], dtype=np.float32),
-    resolution=np.array([0.4, 0.4, 0.4], dtype=np.float32),
-    num_voxels=np.array([100, 50, 50], dtype=np.int32),
+    corner=np.array([-21.25, -1.25, -21.6], dtype=np.float32),
+    resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
+    num_voxels=np.array([213, 213, 215], dtype=np.int32),
 )
+# grid = Grid(
+#     corner=np.array([-20, 0, -20], dtype=np.float32),
+#     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
+#     num_voxels=np.array([200, 200, 200], dtype=np.int32),
+# )
 # grid = Grid(
 #     corner=np.array([-28.1, 0, -28.1], dtype=np.float32),
 #     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
@@ -82,9 +91,9 @@ for beam in plan.beams:
         t_fluence_end = time.perf_counter()
 
 
-        print(grid.num_voxels, grid.resolution, grid.corner)
-        print(source.gantry, source.collimator, source.position, source.isocenter)
-        print(cp.jaw_x_positions, cp.jaw_y_positions)
+        # print(grid.num_voxels, grid.resolution, grid.corner)
+        # print(source.gantry, source.collimator, source.position, source.isocenter)
+        # print(cp.jaw_x_positions, cp.jaw_y_positions)
 
 
 
@@ -184,7 +193,7 @@ for beam in plan.beams:
             sector_mid_angle = (sector_mid_angle + 180.0) % 360.0  # Map back to -180 to 180 range
             source = Source(isocenter=beam.isocenter_position)
             source.gantry = np.float32(sector_mid_angle)
-            source.collimator = np.float32(sector[0].collimator)
+            source.collimator = np.float32(sector[0].collimator + 90.0)
 
             # Calculate the average jaw positions for the sector for output factor correction
             x1 = np.mean([cp.jaw_x_positions[0] for cp in sector], dtype=np.float32)
@@ -194,7 +203,7 @@ for beam in plan.beams:
             jaw_x_positions = np.array([x1, x2], dtype=np.float32)
             jaw_y_positions = np.array([y1, y2], dtype=np.float32)
 
-            print(jaw_x_positions, jaw_y_positions, source.gantry, source.collimator, source.position, source.isocenter)
+            # print(jaw_x_positions, jaw_y_positions, source.gantry, source.collimator, source.position, source.isocenter)
 
             # Pass everything through to the dose calculation function
             t_sector_start = time.perf_counter()
@@ -209,13 +218,11 @@ for beam in plan.beams:
                 settings,
             )
 
-            # fig, ax = plt.subplots(1, 3)
-            # ax[0].imshow(calc[grid.num_voxels[2] // 2, :, :], cmap="plasma")
-            # ax[1].imshow(calc[:, grid.num_voxels[1] // 2, :], cmap="plasma")
-            # ax[2].imshow(calc[:, :, grid.num_voxels[0] // 2], cmap="plasma")
-            # plt.show()
+            fig, ax = plt.subplots(1, 1)
+            ax.imshow(calc[grid.num_voxels[2] // 2, :, :], cmap="plasma")
+            plt.show()
 
-            beam.dose.values += calc
+            beam.dose.values += calc * sector_meterset_weight
             t_sector_end = time.perf_counter()
             print(f"⏱️  Sector {i + 1}/{len(sectors)}: {t_sector_end - t_sector_start:.3f}s")
             # The calculation for this sector is now complete.

@@ -1,7 +1,7 @@
 import numpy as np
 import numpy.typing as npt
 from conehead.kernel import Kernel
-from conehead.nist import mu_water
+from conehead.nist import mass_energy_coefficient_table, mass_energy_absorption_coefficient_table, mu_water, map_materials
 from conehead.grid import Grid
 from conehead.exam import Exam
 from conehead.source import Source
@@ -62,6 +62,7 @@ def calculate(
     d_geo_grid = np.zeros_like(grid.values, dtype=np.float32)
     d_eff_grid = np.zeros_like(grid.values, dtype=np.float32)
     density_grid = exam.densities_on_grid(grid).values
+    material_grid = map_materials(density_grid)
     fluence_grid = np.zeros_like(grid.values, dtype=np.float32)
     terma_grid = np.zeros_like(grid.values, dtype=np.float32)
     mask_grid = np.zeros_like(grid.values, dtype=np.float32)
@@ -190,33 +191,64 @@ def calculate(
 
 
 
-    gpu.terma(
+
+    gpu.terma_spectral(
         terma_grid=terma_grid,
         fluence_grid=fluence_grid,
         d_geo_grid=d_geo_grid,
         d_eff_grid=d_eff_grid,
-        num_voxels=grid.num_voxels,
+        density_grid=density_grid,
+        num_materials=np.int32(10),
+        material_grid=material_grid,
         num_energies=np.int32(len(settings["energy_spectrum"]["energies"])),
         energies=np.array(settings["energy_spectrum"]["energies"], dtype=np.float32),
         energy_weights=kernel.weights,
-        mu_w=mu_water(np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)),
-        source_sad=source.sad,
+        mu_tot_table=mass_energy_coefficient_table(),
+        mu_en_table=mass_energy_absorption_coefficient_table(),
         oad_grid=oad_grid,
         off_axis_softening_fs_interp=oas_factors_interp,
         off_axis_softening_dx=np.float32(oas_oads_interp_dx),
         off_axis_softening_oad_max=np.float32(oas_oads_interp_max),
-        
+        num_voxels=grid.num_voxels,
+        corner=grid.corner,
+        resolution=grid.resolution,
+        source_position=source.position,
+        source_sad=source.sad
     )
 
 
 
-    # ds = [0.1 + 0.2 * x for x in range(201)]
-    # plt.plot(ds, terma_grid[grid.num_voxels[2]//2, :, grid.num_voxels[0]//2])
 
-    # terma_grid = np.zeros_like(grid.values, dtype=np.float32)
-    # terma_grid[grid.num_voxels[2]//2, :, grid.num_voxels[0]//2] = np.float32(1.0)
+    # terma_grid_rescaled = terma_grid * (100.0 / d_geo_grid) * (100.0 / d_geo_grid)
+    # fig, ax = plt.subplots(1, 2, figsize=(16, 8))
+    # ax[0].plot(terma_grid_rescaled[grid.num_voxels[2]//2, :, grid.num_voxels[0]//2])
+    # ax[1].plot(terma_grid_rescaled[grid.num_voxels[2]//2, 25, :])
+    # ax[0].grid('both')
+    # ax[1].grid('both')
+    # plt.show()
 
 
+
+
+
+
+    # gpu.terma(
+    #     terma_grid=terma_grid,
+    #     fluence_grid=fluence_grid,
+    #     d_geo_grid=d_geo_grid,
+    #     d_eff_grid=d_eff_grid,
+    #     num_voxels=grid.num_voxels,
+    #     num_energies=np.int32(len(settings["energy_spectrum"]["energies"])),
+    #     energies=np.array(settings["energy_spectrum"]["energies"], dtype=np.float32),
+    #     energy_weights=kernel.weights,
+    #     mu_tot=mu_water(np.array(settings["energy_spectrum"]["energies"], dtype=np.float32), type="tot"),
+    #     mu_en=mu_water(np.array(settings["energy_spectrum"]["energies"], dtype=np.float32), type="en"),
+    #     source_sad=source.sad,
+    #     oad_grid=oad_grid,
+    #     off_axis_softening_fs_interp=oas_factors_interp,
+    #     off_axis_softening_dx=np.float32(oas_oads_interp_dx),
+    #     off_axis_softening_oad_max=np.float32(oas_oads_interp_max),
+    # )
 
     if settings["calculation"]["terma_mask_enable"]:
         gpu.mask(
@@ -232,7 +264,6 @@ def calculate(
     else:
         mask_grid.fill(1.0)
 
-
     gpu.dose(
         dose_grid=dose_grid,
         resolution=grid.resolution,
@@ -246,7 +277,7 @@ def calculate(
         kernel_thetas=kernel.thetas,
         kernel_phis=kernel.phis,
         kernel_omegas=kernel.omegas,
-        kernel=kernel.values_depth_diff,
+        kernel=kernel.values_depth,
         source_sad=source.sad,
         source_position=source.position,
         source_v_x=source.v_x,
@@ -262,7 +293,30 @@ def calculate(
         ds_cm=kernel.ds_cm,
     )
 
-    
+    terma_grid_rescaled = terma_grid * (100.0 / d_geo_grid) * (100.0 / d_geo_grid)
+    fig, ax = plt.subplots(2, 2, figsize=(12, 12))
+    ax[0, 0].imshow(fluence_grid[grid.num_voxels[2]//2, :, :])
+    ax[0, 1].imshow(terma_grid_rescaled[grid.num_voxels[2]//2, :, :])
+    ax[1, 0].imshow(dose_grid[grid.num_voxels[2]//2, :, :])
+    ax[1, 1].imshow(density_grid[grid.num_voxels[2]//2, :, :])
+    plt.show()
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+    plt.imshow(terma_grid[grid.num_voxels[2]//2, :, :])
+    plt.colorbar()
+    plt.show()
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+    plt.imshow(material_grid[grid.num_voxels[2]//2, :, :])
+    plt.colorbar()
+    plt.show()
+
+    # fig, ax = plt.subplots(1, 2, figsize=(16, 8))
+    # ax[0].plot(terma_grid_rescaled[grid.num_voxels[2]//2, :, grid.num_voxels[0]//2])
+    # ax[1].plot(terma_grid_rescaled[grid.num_voxels[2]//2, 25, :])
+    # ax[0].grid('both')
+    # ax[1].grid('both')
+    # plt.show()
 
     # # Rescale terma grid for no-tilt approximation comparison
     # terma_grid_rescaled = terma_grid * (100.0 / d_geo_grid) * (100.0 / d_geo_grid)
@@ -270,17 +324,19 @@ def calculate(
     # ax[0, 0].imshow(fluence_grid[grid.num_voxels[2]//2, :, :])
     # ax[0, 1].imshow(terma_grid_rescaled[grid.num_voxels[2]//2, :, :])
     # ax[1, 0].imshow(dose_grid[grid.num_voxels[2]//2, :, :])
-    # # ax[1, 0].imshow(np.log10(dose_grid[grid.num_voxels[2]//2, :, :]))
-    # # ax[1, 0].set_xlim([90, 110])
-    # # ax[1, 0].set_ylim([90, 110])
-    # ds = [0.1 + 0.2 * x for x in range(grid.num_voxels[2])]
-    # hl = grid.num_voxels[2]//2
-    # ax[1, 1].plot(ds, fluence_grid[hl, :, hl]/fluence_grid[hl, :, hl].max(), label='Fluence')
-    # ax[1, 1].plot(ds, terma_grid_rescaled[hl, :, hl]/terma_grid_rescaled[hl, :, hl].max(), label='Terma')
-    # ax[1, 1].plot(ds, dose_grid[hl, :, hl]/dose_grid[hl, :, hl].max(), label='Dose')
-    # ax[1, 1].legend()
-    # ax[1, 1].grid('both')
-    # plt.show()
+    # ax[1, 0].imshow(np.log10(dose_grid[grid.num_voxels[2]//2, :, :]))
+    # ax[1, 0].set_xlim([90, 110])
+    # ax[1, 0].set_ylim([90, 110])
+
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    ds = [0.1 + 0.2 * x for x in range(grid.num_voxels[1])]
+    hl = grid.num_voxels[2]//2
+    ax.plot(ds, fluence_grid[hl, :, hl]/fluence_grid[hl, :, hl].max(), label='Fluence')
+    ax.plot(ds, terma_grid_rescaled[hl, :, hl]/terma_grid_rescaled[hl, :, hl].max(), label='Terma')
+    ax.plot(ds, dose_grid[hl, :, hl]/dose_grid[hl, :, hl].max(), label='Dose')
+    ax.legend()
+    ax.grid('both')
+    plt.show()
 
 
 
