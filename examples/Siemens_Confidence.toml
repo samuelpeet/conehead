@@ -2,21 +2,21 @@
 
 [LUT]
 hu = [
-    -972,  # Air
-    -710,  # LN-300 Lung
-    -514,  # LN-450 Lung
-    -91,   # AP6 Adipose
-    -47,   # BR-12 Breast
-    -2,    # Water
-    24,    # BRN-SR2 Brain
-    66,    # LV1 Liver 
-    194,   # IB Inner Bone
-    211,   # B200 Bone Mineral
-    423,   # CB2-30% CaCO3
-    772,   # CB2-50% CaCO3
-    1164,  # SB3 Cortical Bone
-    5808,  # Titanium
-    30657, # Arbitrary upper bound (extrap. from SB3 and Ti)
+    -978,  # Air
+    -709,  # LN-300 Lung
+    -518,  # LN-450 Lung
+    -94,   # AP6 Adipose
+    -52,   # BR-12 Breast
+    -4,    # Water
+    21,    # BRN-SR2 Brain
+    64,    # LV1 Liver 
+    196,   # IB Inner Bone
+    209,   # B200 Bone Mineral
+    431,   # CB2-30% CaCO3
+    786,   # CB2-50% CaCO3
+    1181,  # SB3 Cortical Bone
+    7308,  # Titanium
+    31743, # Arbitrary upper bound (extrap. from SB3 and Ti)
 ]
 density = [
     0.00121, # Air
