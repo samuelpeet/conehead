@@ -124,11 +124,11 @@ class KernelMono:
                 )
             )
 
-            # Normalize kernel by shell volume: dV = (r₂³ - r₁³)/3 · dΩ
-            for i in range(self.kernel.shape[0]):
-                dR = (r_edges[1:] ** 3 - r_edges[:-1] ** 3) / 3
-                dPhi = self.omegas
-                self.kernel[i, :] = self.kernel[i, :] / (dR * dPhi[i])
+            # # Normalize kernel by shell volume: dV = (r₂³ - r₁³)/3 · dΩ
+            # for i in range(self.kernel.shape[0]):
+            #     dR = (r_edges[1:] ** 3 - r_edges[:-1] ** 3) / 3
+            #     dPhi = self.omegas
+            #     self.kernel[i, :] = self.kernel[i, :] / (dR * dPhi[i])
 
             # Normalize so kernel integrates to 1
             self.kernel = self.kernel / self.kernel.sum()

@@ -68,6 +68,140 @@ def calculate(
     mask_grid = np.zeros_like(grid.values, dtype=np.float32)
     dose_grid = np.zeros_like(grid.values, dtype=np.float32)
 
+
+
+
+
+    element_defs = {
+        'H': {'z': 1, 'z_over_a': 0.992},
+        'C': {'z': 6, 'z_over_a': 0.5},
+        'N': {'z': 7, 'z_over_a': 0.5},
+        'O': {'z': 8, 'z_over_a': 0.5},
+        'Na': {'z': 11, 'z_over_a': 0.478},
+        'Mg': {'z': 12, 'z_over_a': 0.494},
+        'Al': {'z': 13, 'z_over_a': 0.482},
+        'P': {'z': 15, 'z_over_a': 0.484},
+        'S': {'z': 16, 'z_over_a': 0.499},
+        'Cl': {'z': 17, 'z_over_a': 0.479},
+        'Ar': {'z': 18, 'z_over_a': 0.451},
+        'K': {'z': 19, 'z_over_a': 0.486},
+        'Ca': {'z': 20, 'z_over_a': 0.499},
+        'Fe': {'z': 26, 'z_over_a': 0.466},
+        'Os': {'z': 76, 'z_over_a': 0.400},
+        'Au': {'z': 79, 'z_over_a': 0.401},
+    }
+
+    materials = {
+        'air': {
+            'rho': 0.001203,  # Mass density
+            'elements': ['N', 'O', 'Ar'],
+            'fractions': [0.755, 0.232, 0.013],
+        },
+        'lung': {
+            'rho': 0.26,
+            'elements': ['H', 'C', 'N', 'O', 'Na', 'P', 'S', 'Cl', 'K'],
+            'fractions': [0.103, 0.105, 0.031, 0.749, 0.002, 0.002, 0.003, 0.003, 0.002],
+        },
+        'adipose': {
+            'rho': 0.95,
+            'elements': ['H', 'C', 'N', 'O', 'Na', 'S', 'Cl'],
+            'fractions': [0.114, 0.598, 0.007, 0.278, 0.001, 0.001, 0.001],
+        },
+        'water': {
+            'rho': 1.0,
+            'elements': ['H', 'O'],
+            'fractions': [0.1119, 0.8881],
+        },
+        'soft_tissue': {
+            'rho': 1.0,
+            'elements': ['H', 'C', 'N', 'O'],
+            'fractions': [0.1012, 0.111, 0.026, 0.7618],
+        },
+        'muscle': {
+            'rho': 1.05,
+            'elements': ['H', 'C', 'N', 'O', 'Na', 'P', 'S', 'Cl', 'K'],
+            'fractions': [0.102, 0.143, 0.034, 0.71, 0.001, 0.002, 0.003, 0.001, 0.004],
+        },
+        'cartilage': {
+            'rho': 1.1,
+            'elements': ['H', 'C', 'N', 'O', 'Na', 'P', 'S', 'Cl'],
+            'fractions': [0.096, 0.099, 0.022, 0.744, 0.005, 0.022, 0.009, 0.003],
+        },
+        'bone': {
+            'rho': 1.85,
+            'elements': ['H', 'C', 'N', 'O', 'Na', 'Mg', 'P', 'S', 'Ca'],
+            'fractions': [0.034, 0.155, 0.042, 0.435, 0.001, 0.002, 0.103, 0.003, 0.225],
+        },
+        'al': {
+            'rho': 2.7,
+            'elements': ['Al'],
+            'fractions': [1.0],
+        },
+        'Fe': {
+            'rho': 7.87,
+            'elements': ['Fe'],
+            'fractions': [1.0],
+        },
+        'Au': {
+            'rho': 19.32,
+            'elements': ['Au'],
+            'fractions': [1.0],
+        },
+        'Os': {
+            'rho': 22.59,
+            'elements': ['Os'],
+            'fractions': [1.0],
+        },
+    }
+
+
+    for mat in materials.values():
+
+        # Compute weighted mean nuclear ratio Z/A for this material
+        mat['z_over_a_mean'] = 0
+        for el, frac in zip(mat['elements'], mat['fractions']):
+            mat['z_over_a_mean'] += element_defs[el]['z_over_a'] * frac
+
+        # Compute weighted mean atomic number Z for this material
+        mat['z_mean'] = 0
+        for el, frac in zip(mat['elements'], mat['fractions']):
+            mat['z_mean'] += frac * (element_defs[el]['z'] * element_defs[el]['z_over_a'])
+        mat['z_mean'] /= mat['z_over_a_mean']
+
+        # Compute electron density
+        mat['rho_e'] = mat['z_over_a_mean'] * mat['rho']
+
+
+    for mat in materials.values():
+
+        # Compute effective density relative to water for the full spectrum at isocentre
+        alpha = 1.775e-3
+        mat['rho_eff_rel'] = 0
+        for e, w in zip(settings["energy_spectrum"]["energies"], settings["energy_spectrum"]["weights_10"]/np.sum(settings["energy_spectrum"]["weights_10"])):
+            rho_eff_mat = mat['rho_e'] * (1 + alpha * (1 + mat['z_mean']) * np.log(e) * e)
+            rho_eff_water = materials['water']['rho_e'] * (1 + alpha * (1 + materials['water']['z_mean']) * np.log(e) * e)
+            mat['rho_eff_rel'] += w * (rho_eff_mat / rho_eff_water)
+
+
+    # Interpolate density grid from rho values to relative effective density values.
+    # Extra datapoint at 0 density with 0 relative effective density is added to 
+    # ensure correct handling of air voxels.
+    rhos = np.array([0] + [mat['rho'] for mat in materials.values()])
+    rho_effs = np.array([0] + [mat['rho_eff_rel'] for mat in materials.values()])
+    density_grid = np.interp(density_grid, rhos, rho_effs).astype(np.float32)
+
+
+
+
+
+
+
+
+
+
+
+
+
     # Perform GPU calculations
     gpu.oad(
         oad_grid=oad_grid,
@@ -198,13 +332,11 @@ def calculate(
         d_geo_grid=d_geo_grid,
         d_eff_grid=d_eff_grid,
         density_grid=density_grid,
-        num_materials=np.int32(10),
-        material_grid=material_grid,
         num_energies=np.int32(len(settings["energy_spectrum"]["energies"])),
         energies=np.array(settings["energy_spectrum"]["energies"], dtype=np.float32),
         energy_weights=kernel.weights,
-        mu_tot_table=mass_energy_coefficient_table(),
-        mu_en_table=mass_energy_absorption_coefficient_table(),
+        mu_tot=mu_water(np.array(settings["energy_spectrum"]["energies"], dtype=np.float32), type="tot"),
+        mu_en=mu_water(np.array(settings["energy_spectrum"]["energies"], dtype=np.float32), type="en"),
         oad_grid=oad_grid,
         off_axis_softening_fs_interp=oas_factors_interp,
         off_axis_softening_dx=np.float32(oas_oads_interp_dx),
@@ -293,23 +425,23 @@ def calculate(
         ds_cm=kernel.ds_cm,
     )
 
-    terma_grid_rescaled = terma_grid * (100.0 / d_geo_grid) * (100.0 / d_geo_grid)
-    fig, ax = plt.subplots(2, 2, figsize=(12, 12))
-    ax[0, 0].imshow(fluence_grid[grid.num_voxels[2]//2, :, :])
-    ax[0, 1].imshow(terma_grid_rescaled[grid.num_voxels[2]//2, :, :])
-    ax[1, 0].imshow(dose_grid[grid.num_voxels[2]//2, :, :])
-    ax[1, 1].imshow(density_grid[grid.num_voxels[2]//2, :, :])
-    plt.show()
+    # terma_grid_rescaled = terma_grid * (100.0 / d_geo_grid) * (100.0 / d_geo_grid)
+    # fig, ax = plt.subplots(2, 2, figsize=(12, 12))
+    # ax[0, 0].imshow(fluence_grid[grid.num_voxels[2]//2, :, :])
+    # ax[0, 1].imshow(terma_grid_rescaled[grid.num_voxels[2]//2, :, :])
+    # ax[1, 0].imshow(dose_grid[grid.num_voxels[2]//2, :, :])
+    # ax[1, 1].imshow(density_grid[grid.num_voxels[2]//2, :, :])
+    # plt.show()
 
-    fig, ax = plt.subplots(1, 1, figsize=(12, 12))
-    plt.imshow(terma_grid[grid.num_voxels[2]//2, :, :])
-    plt.colorbar()
-    plt.show()
+    # fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+    # plt.imshow(terma_grid[grid.num_voxels[2]//2, :, :])
+    # plt.colorbar()
+    # plt.show()
 
-    fig, ax = plt.subplots(1, 1, figsize=(12, 12))
-    plt.imshow(material_grid[grid.num_voxels[2]//2, :, :])
-    plt.colorbar()
-    plt.show()
+    # fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+    # plt.imshow(density_grid[grid.num_voxels[2]//2, :, :])
+    # plt.colorbar()
+    # plt.show()
 
     # fig, ax = plt.subplots(1, 2, figsize=(16, 8))
     # ax[0].plot(terma_grid_rescaled[grid.num_voxels[2]//2, :, grid.num_voxels[0]//2])
@@ -328,15 +460,18 @@ def calculate(
     # ax[1, 0].set_xlim([90, 110])
     # ax[1, 0].set_ylim([90, 110])
 
-    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-    ds = [0.1 + 0.2 * x for x in range(grid.num_voxels[1])]
-    hl = grid.num_voxels[2]//2
-    ax.plot(ds, fluence_grid[hl, :, hl]/fluence_grid[hl, :, hl].max(), label='Fluence')
-    ax.plot(ds, terma_grid_rescaled[hl, :, hl]/terma_grid_rescaled[hl, :, hl].max(), label='Terma')
-    ax.plot(ds, dose_grid[hl, :, hl]/dose_grid[hl, :, hl].max(), label='Dose')
-    ax.legend()
-    ax.grid('both')
-    plt.show()
+
+
+
+    # fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    # ds = [0.1 + 0.2 * x for x in range(grid.num_voxels[1])]
+    # hl = grid.num_voxels[2]//2
+    # ax.plot(ds, fluence_grid[hl, :, hl]/fluence_grid[hl, :, hl].max(), label='Fluence')
+    # ax.plot(ds, terma_grid_rescaled[hl, :, hl]/terma_grid_rescaled[hl, :, hl].max(), label='Terma')
+    # ax.plot(ds, dose_grid[hl, :, hl]/dose_grid[hl, :, hl].max(), label='Dose')
+    # ax.legend()
+    # ax.grid('both')
+    # plt.show()
 
 
 

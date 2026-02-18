@@ -197,7 +197,6 @@ __global__ void dose(float* dose_grid,
 
             float s = 0.0f; // Geometrtic distance travelled along ray (cm)
             float rad_depth = 0.0f; // Effective water equivalent distance travelled along ray (cm)
-            float rad_depth_prev = 0.0f;
             float omega = kernel_omegas[ip];
             float kernel_value_prev = 0.0f; // Previous cumulative kernel value (initialize to 0 at ray start)
 
@@ -249,14 +248,8 @@ __global__ void dose(float* dose_grid,
                 float kernel_value_curr = kernel[kernel_base + depth_idx];
                 float kernel_value_diff = kernel_value_curr - kernel_value_prev;
                 kernel_value_prev = kernel_value_curr;
-                // float kernel_value_diff = kernel[kernel_base + depth_idx];
 
-                // Volume element for this step (using GEOMETRIC distance)
-                float d_r = (s * s * s) - ((s - ds_cm) * (s - ds_cm) * (s - ds_cm));
-                float vol = omega * d_r / 3.0f;
-                rad_depth_prev = rad_depth;
-
-                dose_acc += terma * kernel_value_diff * vol;
+                dose_acc += terma * kernel_value_diff;
             }
         }
     }

@@ -22,13 +22,11 @@
  * @param[in]  d_geo_grid           Device pointer to flattened geometric distances (nx*ny*nz).
  * @param[in]  d_eff_grid           Device pointer to flattened radiological/effective depth grid (nx*ny*nz).
  * @param[in]  density_grid         Device pointer to flattened density grid (nx*ny*nz).
- * @param[in]  num_materials        Number of materials in the material grid.
- * @param[in]  material_grid        Device pointer to flattened material index grid (nx*ny*nz).
  * @param[in]  num_energies         Number of spectral energy bins.
  * @param[in]  energies             Device pointer to per-bin energy values (float[num_energies]).
  * @param[in]  energy_weights       Device pointer to per-bin normalized weights (float[num_energies]).
- * @param[in]  mu_tot_table         Device pointer to per-bin total linear attenuation coefficients (float[num_energies*num_materials]).
- * @param[in]  mu_en_table          Device pointer to per-bin energy absorption coefficients (float[num_energies*num_materials]).
+ * @param[in]  mu_tot           Device pointer to per-bin linear attenuation coefficients (float[num_energies]).
+ * @param[in]  mu_en            Device pointer to per-bin energy absorption coefficients (float[num_energies]).
  * @param[in]  oad_grid             Device pointer to off-axis-distance grid (nx*ny*nz).
  * @param[in]  off_axis_softening_fs_interp Device pointer to LUT for off-axis softening.
  * @param[in]  off_axis_softening_dx Grid spacing for off-axis softening LUT.
@@ -48,13 +46,11 @@ __global__ void terma_spectral(float* terma_grid,
     float* d_geo_grid,
     float* d_eff_grid,
     float* density_grid,
-    int num_materials,
-    int* material_grid,  
     int num_energies,
     float* energies,
     float* energy_weights,
-    float* mu_tot_table,
-    float* mu_en_table,
+    float* mu_tot,
+    float* mu_en,
     float* oad_grid,
     float* off_axis_softening_fs_interp,
     float off_axis_softening_dx,
@@ -130,21 +126,17 @@ __global__ void terma_spectral(float* terma_grid,
                 int idx2 = ix + iy * nx + iz * nx * ny;
                 
                 float density = density_grid[idx2];
-                int material = material_grid[idx2];
-                float mu_tot = mu_tot_table[i * num_materials + material];
 
-                tau += mu_tot * density * ds;
+                tau += mu_tot[i] * density * ds;
             }
             taus[i] = tau;
         }
 
         float terma = 0;
         float fluence = fluence_grid[idx];
-        int material = material_grid[idx];
         for (int i = 0; i < num_energies; i++) {
-            float mu_en = mu_en_table[i * num_materials + material];
             // float d_eff = d_eff_grid[idx] + oas;
-            terma += energy_weights[i] * fluence * energies[i] * expf(-taus[i]) * mu_en;
+            terma += energy_weights[i] * fluence * energies[i] * expf(-taus[i]) * mu_en[i];
         }
         float d_geo = d_geo_grid[idx];
         float no_tilt_descaling = (d_geo / source_sad) * (d_geo / source_sad);
@@ -170,13 +162,11 @@ __global__ void terma_spectral(float* terma_grid,
  * @param d_geo_grid        NumPy array (float32) flattened geometric distances.
  * @param d_eff_grid        NumPy array (float32) flattened radiological depths.
  * @param density_grid      NumPy array (float32) flattened density grid.
- * @param num_materials     Integer: number of materials.
- * @param material_grid     NumPy array (int32) flattened material index grid.
  * @param num_energies      Integer: number of spectral bins.
  * @param energies          NumPy array (float32) per-bin energies.
  * @param energy_weights    NumPy array (float32) per-bin weights (should sum to 1).
- * @param mu_tot_table      NumPy array (float32) per-bin linear attenuation coefficients (num_energies*num_materials).
- * @param mu_en_table       NumPy array (float32) per-bin energy absorption coefficients (num_energies*num_materials).
+ * @param mu_tot            NumPy array (float32) per-bin linear attenuation coefficients (num_energies).
+ * @param mu_en             NumPy array (float32) per-bin energy absorption coefficients (num_energies).
  * @param oad_grid          NumPy array (float32) flattened off-axis distances.
  * @param off_axis_softening_fs_interp NumPy array (float32) LUT for off-axis softening.
  * @param off_axis_softening_dx Float: spacing for the off-axis LUT.
@@ -198,13 +188,11 @@ void map_terma_spectral(
     pybind11::array_t<float> d_geo_grid,
     pybind11::array_t<float> d_eff_grid,
     pybind11::array_t<float> density_grid,
-    int num_materials,
-    pybind11::array_t<int> material_grid,
     int num_energies,
     pybind11::array_t<float> energies,
     pybind11::array_t<float> energy_weights,
-    pybind11::array_t<float> mu_tot_table,
-    pybind11::array_t<float> mu_en_table,
+    pybind11::array_t<float> mu_tot,
+    pybind11::array_t<float> mu_en,
     pybind11::array_t<float> oad_grid,
     pybind11::array_t<float> off_axis_softening_fs_interp,
     float off_axis_softening_dx,
@@ -220,15 +208,14 @@ void map_terma_spectral(
     pybind11::buffer_info d_geo_grid_info = d_geo_grid.request();
     pybind11::buffer_info d_eff_grid_info = d_eff_grid.request();
     pybind11::buffer_info density_grid_info = density_grid.request();
-    pybind11::buffer_info material_grid_info = material_grid.request();
     pybind11::buffer_info num_voxels_info = num_voxels.request();
     pybind11::buffer_info corner_info = corner.request();
     pybind11::buffer_info resolution_info = resolution.request();
     pybind11::buffer_info source_position_info = source_position.request();
     pybind11::buffer_info energies_info = energies.request();
     pybind11::buffer_info energy_weights_info = energy_weights.request();
-    pybind11::buffer_info mu_tot_table_info = mu_tot_table.request();
-    pybind11::buffer_info mu_en_table_info = mu_en_table.request();
+    pybind11::buffer_info mu_tot_info = mu_tot.request();
+    pybind11::buffer_info mu_en_info = mu_en.request();
     pybind11::buffer_info oad_grid_info = oad_grid.request();
     pybind11::buffer_info off_axis_softening_fs_interp_info = off_axis_softening_fs_interp.request();
 
@@ -237,38 +224,36 @@ void map_terma_spectral(
     float* d_geo_grid_ptr = reinterpret_cast<float*>(d_geo_grid_info.ptr);
     float* d_eff_grid_ptr = reinterpret_cast<float*>(d_eff_grid_info.ptr);
     float* density_grid_ptr = reinterpret_cast<float*>(density_grid_info.ptr);
-    int* material_grid_ptr = reinterpret_cast<int*>(material_grid_info.ptr);
     int* num_voxels_ptr = reinterpret_cast<int*>(num_voxels_info.ptr);
     float* corner_ptr = reinterpret_cast<float*>(corner_info.ptr);
     float* resolution_ptr = reinterpret_cast<float*>(resolution_info.ptr);
     float* source_position_ptr = reinterpret_cast<float*>(source_position_info.ptr);
     float* energies_ptr = reinterpret_cast<float*>(energies_info.ptr);
     float* energy_weights_ptr = reinterpret_cast<float*>(energy_weights_info.ptr);
-    float* mu_tot_table_ptr = reinterpret_cast<float*>(mu_tot_table_info.ptr);
-    float* mu_en_table_ptr = reinterpret_cast<float*>(mu_en_table_info.ptr);
+    float* mu_tot_ptr = reinterpret_cast<float*>(mu_tot_info.ptr);
+    float* mu_en_ptr = reinterpret_cast<float*>(mu_en_info.ptr);
     float* oad_grid_ptr = reinterpret_cast<float*>(oad_grid_info.ptr);
     float* off_axis_softening_fs_interp_ptr = reinterpret_cast<float*>(off_axis_softening_fs_interp_info.ptr);
 
     // Allocate device memory and copy inputs
     float *d_terma_grid, *d_fluence_grid, *d_d_geo_grid, *d_d_eff_grid, *d_density_grid;
-    float *d_energies, *d_energy_weights, *d_mu_tot_table, *d_mu_en_table, *d_oad_grid, *d_off_axis_softening_fs_interp;
+    float *d_energies, *d_energy_weights, *d_mu_tot, *d_mu_en, *d_oad_grid, *d_off_axis_softening_fs_interp;
     float *d_corner, *d_resolution, *d_source_position;
-    int *d_num_voxels, *d_material_grid;
+    int *d_num_voxels;
     
     cudaMalloc(&d_terma_grid, terma_grid_info.size * sizeof(float));
     cudaMalloc(&d_fluence_grid, fluence_grid_info.size * sizeof(float));
     cudaMalloc(&d_d_geo_grid, d_geo_grid_info.size * sizeof(float));
     cudaMalloc(&d_d_eff_grid, d_eff_grid_info.size * sizeof(float));
     cudaMalloc(&d_density_grid, density_grid_info.size * sizeof(float));
-    cudaMalloc(&d_material_grid, material_grid_info.size * sizeof(int));
     cudaMalloc(&d_num_voxels, num_voxels_info.size * sizeof(int));
     cudaMalloc(&d_corner, corner_info.size * sizeof(float));
     cudaMalloc(&d_resolution, resolution_info.size * sizeof(float));
     cudaMalloc(&d_source_position, source_position_info.size * sizeof(float));
     cudaMalloc(&d_energies, energies_info.size * sizeof(float));
     cudaMalloc(&d_energy_weights, energy_weights_info.size * sizeof(float));
-    cudaMalloc(&d_mu_tot_table, mu_tot_table_info.size * sizeof(float));
-    cudaMalloc(&d_mu_en_table, mu_en_table_info.size * sizeof(float));
+    cudaMalloc(&d_mu_tot, mu_tot_info.size * sizeof(float));
+    cudaMalloc(&d_mu_en, mu_en_info.size * sizeof(float));
     cudaMalloc(&d_oad_grid, oad_grid_info.size * sizeof(float));
     cudaMalloc(&d_off_axis_softening_fs_interp, off_axis_softening_fs_interp_info.size * sizeof(float));
     
@@ -277,15 +262,14 @@ void map_terma_spectral(
     cudaMemcpy(d_d_geo_grid, d_geo_grid_ptr, d_geo_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_d_eff_grid, d_eff_grid_ptr, d_eff_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_density_grid, density_grid_ptr, density_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_material_grid, material_grid_ptr, material_grid_info.size * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_num_voxels, num_voxels_ptr, num_voxels_info.size * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_corner, corner_ptr, corner_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_resolution, resolution_ptr, resolution_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_source_position, source_position_ptr, source_position_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_energies, energies_ptr, energies_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_energy_weights, energy_weights_ptr, energy_weights_info.size * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_mu_tot_table, mu_tot_table_ptr, mu_tot_table_info.size * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_mu_en_table, mu_en_table_ptr, mu_en_table_info.size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_mu_tot, mu_tot_ptr, mu_tot_info.size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_mu_en, mu_en_ptr, mu_en_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_oad_grid, oad_grid_ptr, oad_grid_info.size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_off_axis_softening_fs_interp, off_axis_softening_fs_interp_ptr, off_axis_softening_fs_interp_info.size * sizeof(float), cudaMemcpyHostToDevice);
 
@@ -301,13 +285,11 @@ void map_terma_spectral(
         d_d_geo_grid,
         d_d_eff_grid,
         d_density_grid,
-        num_materials,
-        d_material_grid,
         num_energies,
         d_energies,
         d_energy_weights,
-        d_mu_tot_table,
-        d_mu_en_table,
+        d_mu_tot,
+        d_mu_en,
         d_oad_grid,
         d_off_axis_softening_fs_interp,
         off_axis_softening_dx,
@@ -328,15 +310,14 @@ void map_terma_spectral(
     cudaFree(d_d_geo_grid);
     cudaFree(d_d_eff_grid);
     cudaFree(d_density_grid);
-    cudaFree(d_material_grid);
     cudaFree(d_num_voxels);
     cudaFree(d_corner);
     cudaFree(d_resolution);
     cudaFree(d_source_position);
     cudaFree(d_energies);
     cudaFree(d_energy_weights);
-    cudaFree(d_mu_tot_table);
-    cudaFree(d_mu_en_table);
+    cudaFree(d_mu_tot);
+    cudaFree(d_mu_en);
     cudaFree(d_oad_grid);
     cudaFree(d_off_axis_softening_fs_interp);
 }

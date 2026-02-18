@@ -30,8 +30,8 @@ PYBIND11_MODULE(conehead_gpu, m)
         py::arg("energy_weights"), py::arg("mu_tot"), py::arg("mu_en"), py::arg("source_sad"),
         py::arg("oad_grid"), py::arg("off_axis_softening_fs_interp"), py::arg("off_axis_softening_dx"),py::arg("off_axis_softening_oad_max"));
     m.def("terma_spectral", &map_terma_spectral, py::arg("terma_grid"), py::arg("fluence_grid"), py::arg("d_geo_grid"),
-        py::arg("d_eff_grid"), py::arg("density_grid"), py::arg("num_materials"), py::arg("material_grid"), py::arg("num_energies"), py::arg("energies"),
-        py::arg("energy_weights"), py::arg("mu_tot_table"), py::arg("mu_en_table"), 
+        py::arg("d_eff_grid"), py::arg("density_grid"), py::arg("num_energies"), py::arg("energies"),
+        py::arg("energy_weights"), py::arg("mu_tot"), py::arg("mu_en"), 
         py::arg("oad_grid"), py::arg("off_axis_softening_fs_interp"), py::arg("off_axis_softening_dx"),py::arg("off_axis_softening_oad_max"),
         py::arg("num_voxels"), py::arg("corner"), py::arg("resolution"), py::arg("source_position"), py::arg("source_sad"));
     m.def("mask", &map_mask, py::arg("mask_grid"), py::arg("terma_grid"), py::arg("num_voxels"),

@@ -16,8 +16,8 @@ from conehead.calculate import calculate
 import pandas as pd
 from scipy.optimize import minimize
 
-toml_file = "Truebeam_6_M120.toml"
-gold_data_file = "6MV Beam Data.xlsx"
+toml_file = "Truebeam_6FFF_M120.toml"
+gold_data_file = "6FFF Beam Data.xlsx"
 
 
 def import_gold_beam_data():
@@ -213,26 +213,29 @@ def optimise_pdd(x, exam, gold):
     settings = toml.load(toml_file)
     energies = np.array(settings["energy_spectrum"]["energies"], dtype=np.float32)
 
-    # c1 = x[0]
-    # c2 = x[1]
-    # energy_weights = energies ** (c1) * np.exp(-c2 * energies)
-    # N = np.sum(energy_weights)
-    # energy_weights /= N
-    # energy_weights /= energies
-    # settings["energy_spectrum"]["weights"] = energy_weights.tolist()
+    c1 = x[0]
+    c2 = x[1]
+    energy_weights = energies ** (c1) * np.exp(-c2 * energies)
+    N = np.sum(energy_weights)
+    energy_weights /= N
+    energy_weights /= energies
+    settings["energy_spectrum"]["weights_3"] = energy_weights.tolist()
+    settings["energy_spectrum"]["weights_10"] = energy_weights.tolist()
+    settings["energy_spectrum"]["weights_40"] = energy_weights.tolist()
+
 
     # mu = x[0]
     # sigma = x[1]
     # energy_weights = 1 / (np.sqrt(2 * np.pi) * sigma * energies)
     # energy_weights *= np.exp(-((-np.log(energies) - mu) ** 2) / (2 * sigma**2))
     
-    energy_weights = np.array(
-        [x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11]], dtype=np.float32
-    )
-    N = np.sum(energy_weights)
-    energy_weights /= N
-    energy_weights *= energies
-    settings["energy_spectrum"]["weights_3"] = energy_weights.tolist()
+    # energy_weights = np.array(
+    #     [x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11]], dtype=np.float32
+    # )
+    # N = np.sum(energy_weights)
+    # energy_weights /= N
+    # energy_weights *= energies
+    # settings["energy_spectrum"]["weights_3"] = energy_weights.tolist()
 
     # Calc doses
     fss = [3]
@@ -256,25 +259,25 @@ def optimise_pdd(x, exam, gold):
 # Optimising energy spectrum
 gold = import_gold_beam_data()
 exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
-x0 = [0.49161678, 0.36570732, 0.32814098, 0.1115883, 0.46065874, 0.19569992, 0.13531406, 0.03368567, 0.02094162, 0.00338178, 0.01224467, 0.00159998]
-# x0 = [9.69450116e-01, 6.16085175e-01, 2.57979554e-01, 1.06088821e-01, 4.56099430e-02, 2.06961609e-02, 9.88857942e-03, 4.95007829e-03, 2.58263913e-03, 1.39778684e-03, 7.81562514e-04, 4.49892002e-04]
-# x0 = [8.81758160e-01, 5.02334430e-01, 2.82445607e-01, 1.39655375e-01, 6.96135200e-02, 3.08778167e-02, 1.84210714e-02, 8.34655500e-03, 5.03643778e-03, 3.13199000e-03, 1.87479455e-03, 8.49121667e-04]
-bounds = [
-    (0.0, 1.0),
-    (0.0, 1.0),
-    (0.0, 1.0),
-    (0.0, 1.0),
-    (0.0, 1.0),
-    (0.0, 1.0),
-    (0.0, 1.0),
-    (0.0, 1.0),
-    (0.0, 1.0),
-    (0.0, 1.0),
-    (0.0, 1.0),
-    (0.0, 1.0)
-]
-# x0 = [0.2, 0.7]
-# bounds = [(0.01, 2.5), (0.01, 2.5)]
+# x0 = [0.49161678, 0.36570732, 0.32814098, 0.1115883, 0.46065874, 0.19569992, 0.13531406, 0.03368567, 0.02094162, 0.00338178, 0.01224467, 0.00159998]
+# bounds = [
+#     (0.0, 1.0),
+#     (0.0, 1.0),
+#     (0.0, 1.0),
+#     (0.0, 1.0),
+#     (0.0, 1.0),
+#     (0.0, 1.0),
+#     (0.0, 1.0),
+#     (0.0, 1.0),
+#     (0.0, 1.0),
+#     (0.0, 1.0),
+#     (0.0, 1.0),
+#     (0.0, 1.0)
+# ]
+x0 = [1.66569869, 1.37482232] # 3 x 3
+# x0 = [1.06238404, 1.09299489]  # 10 x 10
+# x0 = [1.2770388, 1.32998525]  # 40 x 40
+bounds = [(0.01, 2.5), (0.01, 2.5)]
 result = minimize(optimise_pdd, x0, args=(exam, gold), method="Nelder-Mead", bounds=bounds)
 
 # %%
@@ -347,8 +350,8 @@ def calculate_ofcs(fss, exam, settings, gold):
     settings["output_factor_correction"]["factors"] = np.ones_like(fss, dtype=np.float32)
     calc = calculate_doses(fss, exam, settings)
     for fs in fss:
-        # gold_dose_at_10cm = gold[fs]["of"] * 0.635  # 0.635 is PDD(10) for 10 x 10 field (6FFF)
-        gold_dose_at_10cm = gold[fs]["of"] * 0.664  # 0.664 is PDD(10) for 10 x 10 field (6X)
+        gold_dose_at_10cm = gold[fs]["of"] * 0.635  # 0.635 is PDD(10) for 10 x 10 field (6FFF)
+        # gold_dose_at_10cm = gold[fs]["of"] * 0.664  # 0.664 is PDD(10) for 10 x 10 field (6X)
         calc_dose_at_10cm = 0.5 * calc[fs]["pdd"][1][49] + 0.5 * calc[fs]["pdd"][1][50]
         ofc = gold_dose_at_10cm / calc_dose_at_10cm
         calc[fs]["ofc"] = ofc
@@ -546,13 +549,14 @@ fss = [3, 10, 20, 40]
 calc = calculate_doses(fss, exam, settings)
 
 #%%
+pdd10 = 0.635
 plt.style.use('default')
 for fs in fss:
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [3, 1]}, sharex=True)
     
     # Top subplot: overlay both curves
     ax1.set_title("Percentage Depth Dose Comparison for Field Size: {} cm".format(fs))
-    ax1.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, label="Measured")
+    ax1.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, label="Measured")
     ax1.plot(calc[fs]["pdd"][0], calc[fs]["pdd"][1], 'o', color='red', fillstyle='none', label="Conehead")  # Unfilled red circles
     ax1.set_ylabel("Dose (Gy)")
     ax1.legend()
@@ -567,7 +571,7 @@ for fs in fss:
     ax1.grid(which='minor', linewidth=0.5)  # Minor gridlines thinner
     
     # Bottom subplot: percentage difference
-    gold_dose = gold[fs]["pdd"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664
+    gold_dose = gold[fs]["pdd"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10
     calc_dose_interp = np.interp(gold[fs]["pdd"][0], calc[fs]["pdd"][0], calc[fs]["pdd"][1])
     pct_diff = 100 * (calc_dose_interp - gold_dose) / gold_dose
     abs_diff = calc_dose_interp - gold_dose
@@ -586,11 +590,14 @@ for fs in fss:
     plt.tight_layout()
 
 # %%
+pdd10 = 0.635  # For 6FFF
+# pdd10 = 0.664  # For 6X
 plt.style.use('dark_background')
 lines = []
 fig, ax = plt.subplots(1, 1, figsize=(14, 8))
 for fs in fss:
-    line1, = ax.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, color='red', label='Measured')
+    # line1, = ax.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, color='red', label='Measured')
+    line1, = ax.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
     line2, = ax.plot(calc[fs]["pdd"][0], calc[fs]["pdd"][1], '-', color='#3535ff', label='Calculated')          
     lines.append(line1)
     lines.append(line2)
@@ -617,19 +624,21 @@ for fs in fss:
 plt.legend(handles=[lines[0], lines[1]])
 
 # %%
+pdd10 = 0.635  # For 6FFF
+# pdd10 = 0.664  # For 6X
 plt.style.use('dark_background')
 lines = []
 fig, ax = plt.subplots(1, 1, figsize=(14, 8))
 for fs in fss:
-    line1, = ax.plot(gold[fs]["prof_15"][0], gold[fs]["prof_15"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, color='red', label='Measured')
+    line1, = ax.plot(gold[fs]["prof_15"][0], gold[fs]["prof_15"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
     line2, = ax.plot(calc[fs]["prof_15"][0], calc[fs]["prof_15"][1], '-', color="#3535ff", label='Calculated')
-    ax.plot(gold[fs]["prof_50"][0], gold[fs]["prof_50"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, color='red', label='Measured')
+    ax.plot(gold[fs]["prof_50"][0], gold[fs]["prof_50"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
     ax.plot(calc[fs]["prof_50"][0], calc[fs]["prof_50"][1], '-', color='#3535ff', label='Calculated')    
-    ax.plot(gold[fs]["prof_100"][0], gold[fs]["prof_100"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, color='red', label='Measured')
+    ax.plot(gold[fs]["prof_100"][0], gold[fs]["prof_100"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
     ax.plot(calc[fs]["prof_100"][0], calc[fs]["prof_100"][1], '-', color='#3535ff', label='Calculated')   
-    ax.plot(gold[fs]["prof_200"][0], gold[fs]["prof_200"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, color='red', label='Measured')
+    ax.plot(gold[fs]["prof_200"][0], gold[fs]["prof_200"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
     ax.plot(calc[fs]["prof_200"][0], calc[fs]["prof_200"][1], '-', color='#3535ff', label='Calculated')   
-    ax.plot(gold[fs]["prof_300"][0], gold[fs]["prof_300"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, color='red', label='Measured')
+    ax.plot(gold[fs]["prof_300"][0], gold[fs]["prof_300"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
     ax.plot(calc[fs]["prof_300"][0], calc[fs]["prof_300"][1], '-', color='#3535ff', label='Calculated')               
     lines.append(line1)
     lines.append(line2)
@@ -654,19 +663,21 @@ for fs in fss:
 plt.legend(handles=[lines[0], lines[1]])
 
 # %%
+pdd10 = 0.635  # For 6FFF
+# pdd10 = 0.664  # For 6X
 plt.style.use('dark_background')
 lines = []
 fig, ax = plt.subplots(1, 1, figsize=(14, 8))
 fs = 40
-line1, = ax.plot(gold[fs]["diag_15"][0], gold[fs]["diag_15"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, color='red', label='Measured')
+line1, = ax.plot(gold[fs]["diag_15"][0], gold[fs]["diag_15"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
 line2, = ax.plot(calc[fs]["diag_15"][0], calc[fs]["diag_15"][1], '-', color="#3535ff", label='Calculated')
-ax.plot(gold[fs]["diag_50"][0], gold[fs]["diag_50"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, color='red', label='Measured')
+ax.plot(gold[fs]["diag_50"][0], gold[fs]["diag_50"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
 ax.plot(calc[fs]["diag_50"][0], calc[fs]["diag_50"][1], '-', color='#3535ff', label='Calculated')    
-ax.plot(gold[fs]["diag_100"][0], gold[fs]["diag_100"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, color='red', label='Measured')
+ax.plot(gold[fs]["diag_100"][0], gold[fs]["diag_100"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
 ax.plot(calc[fs]["diag_100"][0], calc[fs]["diag_100"][1], '-', color='#3535ff', label='Calculated')   
-ax.plot(gold[fs]["diag_200"][0], gold[fs]["diag_200"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, color='red', label='Measured')
+ax.plot(gold[fs]["diag_200"][0], gold[fs]["diag_200"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
 ax.plot(calc[fs]["diag_200"][0], calc[fs]["diag_200"][1], '-', color='#3535ff', label='Calculated')   
-ax.plot(gold[fs]["diag_300"][0], gold[fs]["diag_300"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * 0.664, color='red', label='Measured')
+ax.plot(gold[fs]["diag_300"][0], gold[fs]["diag_300"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
 ax.plot(calc[fs]["diag_300"][0], calc[fs]["diag_300"][1], '-', color='#3535ff', label='Calculated')               
 lines.append(line1)
 lines.append(line2)
