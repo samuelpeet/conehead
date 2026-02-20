@@ -17,7 +17,7 @@ from conehead.plan import Plan
 from conehead.grid import Grid
 from conehead.block import Block
 from conehead.source import Source
-from conehead.calculate import calculate
+from conehead.calculate import calculate_fluence, calculate_dose
 
 
 # Load machine settings
@@ -30,9 +30,11 @@ settings = toml.load("Truebeam_6_M120.toml")
 # dicom_dir = "10"
 # dicom_dir = "10_water_mix"
 # dicom_dir = "slab_bone"
-dicom_dir = "slab_lung"
+# dicom_dir = "slab_lung"
 # dicom_dir = "slab_soft_tissue"
 # dicom_dir = "PROSTATE VMAT"
+# dicom_dir = "PROSTATE 4FB"
+dicom_dir = "MLC TEST"
 # dicom_dir = "MLC Fields 6FFF"
 exam = Exam(dicom_dir=f"{dicom_dir}", hu_lut_path="Siemens_Confidence.toml")
 plan = Plan(dicom_dir=f"{dicom_dir}")
@@ -43,7 +45,7 @@ print(f"⏱️  Loading data: {t_load - t_start:.3f}s")
 # grid = Grid(
 #     corner=np.array([-26.95665, -23.1248, -10.2], dtype=np.float32),
 #     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
-#     num_voxels=np.array([267, 206, 138], dtype=np.int32),
+#     num_voxels=np.array([267, 206, 128], dtype=np.int32),
 # )
 grid = Grid(
     corner=np.array([-21.25, -1.25, -21.6], dtype=np.float32),
@@ -78,34 +80,28 @@ for beam in plan.beams:
         source = Source(isocenter=beam.isocenter_position)
         source.gantry = cp.gantry
         source.collimator = cp.collimator + 90.0
-        # print(f"Collimator, Gantry: {source.collimator}, {source.gantry}")
-        # print(f"Source position: {source.position}")
-        # print(f"Isocenter: {source.isocenter}")
 
         # Initalise the block and compute the fluence maps
         t_fluence_start = time.perf_counter()
         block = Block(control_point=cp, settings=settings)
-        # block = Block(settings=settings)
-        # block.set_square(20)
         fluence_map_pri, fluence_map_sec = block.get_fluence_maps()
         t_fluence_end = time.perf_counter()
-
-
-        # print(grid.num_voxels, grid.resolution, grid.corner)
-        # print(source.gantry, source.collimator, source.position, source.isocenter)
-        # print(cp.jaw_x_positions, cp.jaw_y_positions)
-
-
-
-        # Pass everything through to the dose calculation function
-        print(f"Calculating beam: {beam.name}")
-        t_calc_start = time.perf_counter()
-        beam.dose.values += calculate(  # type: ignore
+        fluence_grid = calculate_fluence(
             grid,
             source,
             fluence_map_pri,
             fluence_map_sec,
+            settings
+        )
+
+        # Pass everything through to the dose calculation function
+        print(f"Calculating beam: {beam.name}")
+        t_calc_start = time.perf_counter()
+        beam.dose.values += calculate_dose(  # type: ignore
+            grid,
+            source,
             exam,
+            fluence_grid,
             cp.jaw_x_positions,
             cp.jaw_y_positions,
             settings,
@@ -122,24 +118,21 @@ for beam in plan.beams:
         # the next. This is typical of VMAT beams and sliding-window IMRT beams. IMRT is not
         # supported yet, so we will assume this is a VMAT beam for now.
         #
-        # We will need to implement special handling for VMAT beams, as they typically contain many
+        # We will need to implement special handling for VMAT beams as they typically contain many
         # control points with small angular increments. Performing a calculation at each control
-        # point would be prohibitive, e.g., an arc with 180 control points (2 degree spacing) would
+        # point would take a long time, e.g., an arc with 180 control points (2 degree spacing) would
         # take 180 times longer to calculate than a 3DCRT beam at a single angle. So, we want to
         # sample the arc down to a manageable number of angles while still capturing the plan's
         # essence. We do this by grouping the control points into arc sectors of a user-specified
         # size (e.g., 10 degrees) and combining the control points within each sector into a single
-        # representative control point by calculating an average fluence map weighted by the
-        # relative meterset weight of each control point in the sector. We take the gantry angle at
-        # the middle of the sector as the representative angle.
+        # representative control point. We take the gantry angle at the middle of the sector as the 
+        # representative angle.
 
         # Let's start by inspecting the control points and grabbing the gantry angle at each point.
         # To handle the discontinuity at gantry 0/360, we map the gantry angles to a 0-360 degree
         # range starting from 6 o'clock and going clockwise.
         control_points = beam.control_points
         gantry_angles = [((float(cp.gantry) + 180.0) % 360.0) for cp in control_points]
-
-        # Create the source and offset the dose grid as per the isocenter position
 
         # Now we want to iterate through the gantry angles and group the control points into sectors.
         # We start from the first angle and keep adding control points until we exceed the sector
@@ -165,37 +158,47 @@ for beam in plan.beams:
                 current_sector_cps.append(control_points[i])
 
         # Now that we have the control points grouped into sectors, we combine the control points in
-        # each sector to get a representative control point for that sector. We then calculate the
+        # each sector to get a "representative" control point for that sector. We then calculate the
         # dose from this sector.
         for i, sector in enumerate(sectors):
             print(f"Calculating sector {i + 1}/{len(sectors)} with {len(sector)} control points")
+            t_sector_start = time.perf_counter()
+            
             # Calculate the total meterset weight for the sector
             sector_meterset_weight = sector[-1].cum_meterset_weight - sector[0].cum_meterset_weight
-            # Combine the control points in the sector into a single Block weighted by relative
-            # meterset weight
-            sector_block = Block(settings=settings)
-            for cp in sector:
-                cp_block = Block(settings=settings, control_point=cp)
-                rel_weight = cp.diff_meterset_weight / sector_meterset_weight
-                sector_block.values += cp_block.values * rel_weight
-                sector_block.wedge_angle = None
-            fluence_map_pri, fluence_map_sec = sector_block.get_fluence_maps()
 
-            fig, ax = plt.subplots(1, 2)
-            ax[0].imshow(fluence_map_pri, cmap="plasma")
-            ax[1].imshow(fluence_map_sec, cmap="plasma")
-            plt.show()
+            # Calculate the fluence from each control point in the sector individually and combine
+            # into a single fluence grid.
+            sector_fluence_grid = np.zeros_like(grid.values, dtype=np.float32)
+            for cp in sector:
+                source = Source(isocenter=beam.isocenter_position)
+                source.gantry = np.float32(cp.gantry)
+                source.collimator = np.float32(cp.collimator + 90.0)                
+                cp_block = Block(settings=settings, control_point=cp)
+                fluence_map_pri, fluence_map_sec = cp_block.get_fluence_maps()
+                fluence_grid = calculate_fluence(
+                    grid,
+                    source,
+                    fluence_map_pri,
+                    fluence_map_sec,
+                    settings
+                )
+                sector_fluence_grid += (cp.diff_meterset_weight / sector_meterset_weight) * fluence_grid
 
             # Calculate representative gantry angle for the sector (middle of start and end angles)
             sector_start_angle = (sector[0].gantry + 180.0) % 360.0
             sector_end_angle = (sector[-1].gantry + 180.0) % 360.0
             sector_mid_angle = (sector_start_angle + sector_end_angle) / 2
             sector_mid_angle = (sector_mid_angle + 180.0) % 360.0  # Map back to -180 to 180 range
+
+            # Initialise the source geometry for this sector using the representative gantry angle
             source = Source(isocenter=beam.isocenter_position)
             source.gantry = np.float32(sector_mid_angle)
             source.collimator = np.float32(sector[0].collimator + 90.0)
 
             # Calculate the average jaw positions for the sector for output factor correction
+            # TODO: weight the jaw positions by the meterset weight of each control point in the 
+            # sector instead of just taking a simple average.
             x1 = np.mean([cp.jaw_x_positions[0] for cp in sector], dtype=np.float32)
             y1 = np.mean([cp.jaw_y_positions[0] for cp in sector], dtype=np.float32)
             x2 = np.mean([cp.jaw_x_positions[1] for cp in sector], dtype=np.float32)
@@ -203,23 +206,25 @@ for beam in plan.beams:
             jaw_x_positions = np.array([x1, x2], dtype=np.float32)
             jaw_y_positions = np.array([y1, y2], dtype=np.float32)
 
-            # print(jaw_x_positions, jaw_y_positions, source.gantry, source.collimator, source.position, source.isocenter)
-
             # Pass everything through to the dose calculation function
-            t_sector_start = time.perf_counter()
-            calc = calculate(  # type: ignore
+            calc = calculate_dose(  # type: ignore
                 grid,
                 source,
-                fluence_map_pri,
-                fluence_map_sec,
                 exam,
+                sector_fluence_grid,
                 jaw_x_positions,
                 jaw_y_positions,
                 settings,
             )
 
-            fig, ax = plt.subplots(1, 1)
-            ax.imshow(calc[grid.num_voxels[2] // 2, :, :], cmap="plasma")
+            # Visualise the fluence and dose for this sector for debugging
+            fig, ax = plt.subplots(1, 2)
+            ax[0].imshow(sector_fluence_grid[grid.num_voxels[2] // 2, :, :], cmap="plasma")
+            ax[0].set_title("Fluence")
+            ax[0].axis("off")
+            ax[1].imshow(calc[grid.num_voxels[2] // 2, :, :], cmap="plasma")
+            ax[1].set_title("Dose")
+            ax[1].axis("off")
             plt.show()
 
             beam.dose.values += calc * sector_meterset_weight

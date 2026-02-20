@@ -12,12 +12,12 @@ from conehead.plan import Plan
 from conehead.grid import Grid
 from conehead.block import Block
 from conehead.source import Source
-from conehead.calculate import calculate
+from conehead.calculate import calculate_fluence, calculate_dose
 import pandas as pd
 from scipy.optimize import minimize
 
-toml_file = "Truebeam_6FFF_M120.toml"
-gold_data_file = "6FFF Beam Data.xlsx"
+toml_file = "Truebeam_6_M120.toml"
+gold_data_file = "6MV Beam Data.xlsx"
 
 
 def import_gold_beam_data():
@@ -101,13 +101,20 @@ def run(fs, grid, exam, settings):
     block = Block(settings=settings)
     block.set_square(fs)
     fluence_map_pri, fluence_map_sec = block.get_fluence_maps()
-    dose = Grid(corner=grid.corner, resolution=grid.resolution, num_voxels=grid.num_voxels)    
-    dose.values += calculate(  # type: ignore
+    dose = Grid(corner=grid.corner, resolution=grid.resolution, num_voxels=grid.num_voxels)
+    fluence_grid = calculate_fluence(
         grid,
         source,
         fluence_map_pri,
         fluence_map_sec,
+        settings
+    ) 
+
+    dose.values += calculate_dose(
+        grid,
+        source,
         exam,
+        fluence_grid,
         [-fs / 2, fs / 2],
         [-fs / 2, fs / 2],
         settings,
@@ -238,7 +245,7 @@ def optimise_pdd(x, exam, gold):
     # settings["energy_spectrum"]["weights_3"] = energy_weights.tolist()
 
     # Calc doses
-    fss = [3]
+    fss = [40]
     calc = calculate_doses(fss, exam, settings)
     fig, ax = plt.subplots(1, 1, figsize=(12, 9))
     for fs in fss:
@@ -274,9 +281,9 @@ exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
 #     (0.0, 1.0),
 #     (0.0, 1.0)
 # ]
-x0 = [1.66569869, 1.37482232] # 3 x 3
-# x0 = [1.06238404, 1.09299489]  # 10 x 10
-# x0 = [1.2770388, 1.32998525]  # 40 x 40
+# x0 = [2.35476884, 1.3858963] # 3 x 3
+# x0 = [1.33441245, 0.97771809]  # 10 x 10
+x0 = [2.46958337, 1.7451692]  # 40 x 40
 bounds = [(0.01, 2.5), (0.01, 2.5)]
 result = minimize(optimise_pdd, x0, args=(exam, gold), method="Nelder-Mead", bounds=bounds)
 
@@ -350,8 +357,8 @@ def calculate_ofcs(fss, exam, settings, gold):
     settings["output_factor_correction"]["factors"] = np.ones_like(fss, dtype=np.float32)
     calc = calculate_doses(fss, exam, settings)
     for fs in fss:
-        gold_dose_at_10cm = gold[fs]["of"] * 0.635  # 0.635 is PDD(10) for 10 x 10 field (6FFF)
-        # gold_dose_at_10cm = gold[fs]["of"] * 0.664  # 0.664 is PDD(10) for 10 x 10 field (6X)
+        # gold_dose_at_10cm = gold[fs]["of"] * 0.635  # 0.635 is PDD(10) for 10 x 10 field (6FFF)
+        gold_dose_at_10cm = gold[fs]["of"] * 0.664  # 0.664 is PDD(10) for 10 x 10 field (6X)
         calc_dose_at_10cm = 0.5 * calc[fs]["pdd"][1][49] + 0.5 * calc[fs]["pdd"][1][50]
         ofc = gold_dose_at_10cm / calc_dose_at_10cm
         calc[fs]["ofc"] = ofc
@@ -545,11 +552,12 @@ gold = import_gold_beam_data()
 exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
 settings = toml.load(toml_file)
 # fss = [3, 4, 6, 8, 10, 20, 30, 40]
-fss = [3, 10, 20, 40]
+fss = [20]
 calc = calculate_doses(fss, exam, settings)
 
 #%%
-pdd10 = 0.635
+# pdd10 = 0.635  # For 6FFF
+pdd10 = 0.664  # For 6X
 plt.style.use('default')
 for fs in fss:
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [3, 1]}, sharex=True)
@@ -590,8 +598,8 @@ for fs in fss:
     plt.tight_layout()
 
 # %%
-pdd10 = 0.635  # For 6FFF
-# pdd10 = 0.664  # For 6X
+# pdd10 = 0.635  # For 6FFF
+pdd10 = 0.664  # For 6X
 plt.style.use('dark_background')
 lines = []
 fig, ax = plt.subplots(1, 1, figsize=(14, 8))
@@ -624,8 +632,8 @@ for fs in fss:
 plt.legend(handles=[lines[0], lines[1]])
 
 # %%
-pdd10 = 0.635  # For 6FFF
-# pdd10 = 0.664  # For 6X
+# pdd10 = 0.635  # For 6FFF
+pdd10 = 0.664  # For 6X
 plt.style.use('dark_background')
 lines = []
 fig, ax = plt.subplots(1, 1, figsize=(14, 8))
@@ -663,8 +671,8 @@ for fs in fss:
 plt.legend(handles=[lines[0], lines[1]])
 
 # %%
-pdd10 = 0.635  # For 6FFF
-# pdd10 = 0.664  # For 6X
+# pdd10 = 0.635  # For 6FFF
+pdd10 = 0.664  # For 6X
 plt.style.use('dark_background')
 lines = []
 fig, ax = plt.subplots(1, 1, figsize=(14, 8))
