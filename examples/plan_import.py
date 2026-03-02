@@ -22,7 +22,7 @@ from conehead.calculate import calculate_fluence, calculate_dose
 
 # Load machine settings
 t_start = time.perf_counter()
-settings = toml.load("Truebeam_6_M120.toml")
+settings = toml.load("Truebeam_M120_6X_RBWH.toml")
 
 # Load CT/Structure Set and Plan
 # dicom_dir = "Prostate Wedge"
@@ -34,24 +34,49 @@ settings = toml.load("Truebeam_6_M120.toml")
 # dicom_dir = "slab_soft_tissue"
 # dicom_dir = "PROSTATE VMAT"
 # dicom_dir = "PROSTATE 4FB"
-dicom_dir = "MLC TEST"
+# dicom_dir = "MLC TEST"
 # dicom_dir = "MLC Fields 6FFF"
+# dicom_dir = "Octavius_10"
+# dicom_dir = "GREEN"
+# dicom_dir = "GREEN G0"
+dicom_dir = "GREEN/water override"
+# dicom_dir = "DCAT"
+# dicom_dir = "Octavius_VMAT"
+# dicom_dir = "KNIGHT"
+# dicom_dir = "MLC Transmission"
+# dicom_dir = "MLC Half Block"
+
 exam = Exam(dicom_dir=f"{dicom_dir}", hu_lut_path="Siemens_Confidence.toml")
 plan = Plan(dicom_dir=f"{dicom_dir}")
 t_load = time.perf_counter()
 print(f"⏱️  Loading data: {t_load - t_start:.3f}s")
 
 # Define grid geometry for dose calculation
+# grid = Grid(  # Phantom Small Water
+#     corner=np.array([-15.53187, -30.19982, -15.7], dtype=np.float32),
+#     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
+#     num_voxels=np.array([156, 156, 157], dtype=np.int32),
+# )
+grid = Grid(  # Octavius 1500
+    corner=np.array([-26.68515, -44.60437, -15.5], dtype=np.float32),
+    resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
+    num_voxels=np.array([267, 211, 155], dtype=np.int32),
+)
 # grid = Grid(
 #     corner=np.array([-26.95665, -23.1248, -10.2], dtype=np.float32),
 #     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
 #     num_voxels=np.array([267, 206, 128], dtype=np.int32),
 # )
-grid = Grid(
-    corner=np.array([-21.25, -1.25, -21.6], dtype=np.float32),
-    resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
-    num_voxels=np.array([213, 213, 215], dtype=np.int32),
-)
+# grid = Grid(  # PHANTOM WATER
+#     corner=np.array([-20.24505, -0.2450451, -20.6], dtype=np.float32),
+#     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
+#     num_voxels=np.array([203, 203, 205], dtype=np.int32),
+# )
+# grid = Grid(  # PHANTOM WATER
+#     corner=np.array([-21.25, -1.25, -21.6], dtype=np.float32),
+#     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
+#     num_voxels=np.array([213, 213, 215], dtype=np.int32),
+# )
 # grid = Grid(
 #     corner=np.array([-20, 0, -20], dtype=np.float32),
 #     resolution=np.array([0.2, 0.2, 0.2], dtype=np.float32),
@@ -134,28 +159,41 @@ for beam in plan.beams:
         control_points = beam.control_points
         gantry_angles = [((float(cp.gantry) + 180.0) % 360.0) for cp in control_points]
 
+
         # Now we want to iterate through the gantry angles and group the control points into sectors.
-        # We start from the first angle and keep adding control points until we exceed the sector
-        # angle limit.
         sectors = []
-        sector_size = settings["calculation"]["arc_sector_size"]  # degrees
-        current_sector_start_angle = gantry_angles[0]
-        current_sector_cps = [control_points[0]]
-        for i in range(1, len(gantry_angles)):
-            angle = gantry_angles[i]
-            if abs(angle - current_sector_start_angle) >= sector_size:
-                # Finish the current sector
-                sectors.append(current_sector_cps)
-                # Start a new sector
-                current_sector_start_angle = angle
-                current_sector_cps = [control_points[i]]
-            elif i == len(gantry_angles) - 1:
-                # Last control point
-                current_sector_cps.append(control_points[i])
-                sectors.append(current_sector_cps)
-            else:
-                # Add to current sector
-                current_sector_cps.append(control_points[i])
+
+        # Let's just do a quick check to see if all the gantry angles are the same, indicating
+        # that this is actually an IMRT beam or a VMAT beam with gantry angle collapsed to zero
+        # for QA purposes. If so, let's just choose to split it into 36 sectors arbitrarily.
+        if all(angle == gantry_angles[0] for angle in gantry_angles):
+            # Iterate through the control points and group them into 36 lists of equal size
+            num_sectors = 36
+            sector_size = len(control_points) // num_sectors
+            sectors = [control_points[i:i + sector_size] for i in range(0, len(control_points), sector_size)]
+
+        else:
+
+            # We start from the first angle and keep adding control points until we exceed the sector
+            # angle limit.
+            sector_size = settings["calculation"]["arc_sector_size"]  # degrees
+            current_sector_start_angle = gantry_angles[0]
+            current_sector_cps = [control_points[0]]
+            for i in range(1, len(gantry_angles)):
+                angle = gantry_angles[i]
+                if abs(angle - current_sector_start_angle) >= sector_size:
+                    # Finish the current sector
+                    sectors.append(current_sector_cps)
+                    # Start a new sector
+                    current_sector_start_angle = angle
+                    current_sector_cps = [control_points[i]]
+                elif i == len(gantry_angles) - 1:
+                    # Last control point
+                    current_sector_cps.append(control_points[i])
+                    sectors.append(current_sector_cps)
+                else:
+                    # Add to current sector
+                    current_sector_cps.append(control_points[i])
 
         # Now that we have the control points grouped into sectors, we combine the control points in
         # each sector to get a "representative" control point for that sector. We then calculate the

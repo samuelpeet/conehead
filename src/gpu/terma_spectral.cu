@@ -129,14 +129,14 @@ __global__ void terma_spectral(float* terma_grid,
 
                 tau += mu_tot[i] * density * ds;
             }
-            taus[i] = tau;
+            taus[i] = tau + mu_tot[i] * oas;
         }
 
         float terma = 0;
         float fluence = fluence_grid[idx];
         for (int i = 0; i < num_energies; i++) {
             // float d_eff = d_eff_grid[idx] + oas;
-            terma += energy_weights[i] * fluence * energies[i] * expf(-(taus[i] + oas)) * mu_en[i];
+            terma += energy_weights[i] * fluence * energies[i] * expf(-taus[i]) * mu_en[i];
         }
         float d_geo = d_geo_grid[idx];
         float no_tilt_descaling = (d_geo / source_sad) * (d_geo / source_sad);

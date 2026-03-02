@@ -131,4 +131,35 @@ examples/20*
 examples/30*
 examples/40*
 examples/slab*
+examples/GREEN*
+examples/KNIGHT*
+examples/Octavius*
+examples/DCAT*
+examples/GOULDEN*
+
+
 *.DS_Store
+
+
+# dicom_dir = "Prostate Wedge"
+# dicom_dir = "3DCRT 6FFF"
+# dicom_dir = "10"
+# dicom_dir = "10_water_mix"
+# dicom_dir = "slab_bone"
+# dicom_dir = "slab_lung"
+# dicom_dir = "slab_soft_tissue"
+# dicom_dir = "PROSTATE VMAT"
+# dicom_dir = "PROSTATE 4FB"
+# dicom_dir = "MLC TEST"
+# dicom_dir = "MLC Fields 6FFF"
+# dicom_dir = "Octavius_10"
+# dicom_dir = "GREEN"
+# dicom_dir = "GREEN G0"
+dicom_dir = "GREEN/water override"
+# dicom_dir = "DCAT"
+# dicom_dir = "Octavius_VMAT"
+# dicom_dir = "KNIGHT"
+# dicom_dir = "MLC Transmission"
+# dicom_dir = "MLC Half Block"
+
+

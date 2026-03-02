@@ -16,81 +16,156 @@ from conehead.calculate import calculate_fluence, calculate_dose
 import pandas as pd
 from scipy.optimize import minimize
 
-toml_file = "Truebeam_6_M120.toml"
-gold_data_file = "6MV Beam Data.xlsx"
+toml_file = "Truebeam_M120_6X_RBWH.toml"
+
+
+
+# def import_gold_beam_data():
+#     # Read gold beam PDDs and crossline profiles. Profiles are scaled by the PDD at the profile depth.
+#     gold_data_file = "6MV Beam Data.xlsx"
+
+#     gold = {}
+#     df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 1.5cm")
+#     fss = [3, 4, 6, 8, 10, 20, 30, 40]
+#     # ofs = [0.838663, 0.874284, 0.92817, 0.969307, 1.0, 1.083025, 1.113093, 1.132091]  # 6FFF
+#     ofs = [0.827548, 0.862568, 0.917877, 0.965234, 1.0, 1.102564, 1.144229, 1.178926]  # 6MV
+#     for i, v in enumerate(fss):
+#         gold[v] = {}
+#         gold[v]["of"] = ofs[i]
+#         df = pd.read_excel(gold_data_file, sheet_name="Open Field Depth Dose")
+#         gold[v]["pdd"] = [
+#             df.iloc[5:, 0].to_numpy().astype(np.float32),
+#             df.iloc[5:, i + 1].to_numpy().astype(np.float32) / 100,
+#         ]
+#         df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 1.5cm")
+#         gold[v]["prof_15"] = [
+#             df.iloc[7:, 0].to_numpy().astype(np.float32),
+#             df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][15],
+#         ]
+#         df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 5cm")
+#         gold[v]["prof_50"] = [
+#             df.iloc[7:, 0].to_numpy().astype(np.float32),
+#             df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][50],
+#         ]
+#         df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 10cm")
+#         gold[v]["prof_100"] = [
+#             df.iloc[7:, 0].to_numpy().astype(np.float32),
+#             df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][100],
+#         ]
+#         df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 20cm")
+#         gold[v]["prof_200"] = [
+#             df.iloc[7:, 0].to_numpy().astype(np.float32),
+#             df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][200],
+#         ]
+#         df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 30cm")
+#         gold[v]["prof_300"] = [
+#             df.iloc[7:, 0].to_numpy().astype(np.float32),
+#             df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][300],
+#         ]
+#     df = pd.read_excel(gold_data_file, sheet_name="Diagonal Profiles")
+#     gold[40]["diag_15"] = [
+#         df.iloc[6:, 0].to_numpy().astype(np.float32),
+#         df.iloc[6:, 1].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][15],
+#     ]
+#     gold[40]["diag_15"][0] = gold[40]["diag_15"][0][~np.isnan(gold[40]["diag_15"][1])]
+#     gold[40]["diag_15"][1] = gold[40]["diag_15"][1][~np.isnan(gold[40]["diag_15"][1])]
+#     gold[40]["diag_50"] = [
+#         df.iloc[6:, 0].to_numpy().astype(np.float32),
+#         df.iloc[6:, 2].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][50],
+#     ]
+#     gold[40]["diag_50"][0] = gold[40]["diag_50"][0][~np.isnan(gold[40]["diag_50"][1])]
+#     gold[40]["diag_50"][1] = gold[40]["diag_50"][1][~np.isnan(gold[40]["diag_50"][1])]
+#     gold[40]["diag_100"] = [
+#         df.iloc[6:, 0].to_numpy().astype(np.float32),
+#         df.iloc[6:, 3].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][100],
+#     ]
+#     gold[40]["diag_100"][0] = gold[40]["diag_100"][0][~np.isnan(gold[40]["diag_100"][1])]
+#     gold[40]["diag_100"][1] = gold[40]["diag_100"][1][~np.isnan(gold[40]["diag_100"][1])]
+#     gold[40]["diag_200"] = [
+#         df.iloc[6:, 0].to_numpy().astype(np.float32),
+#         df.iloc[6:, 4].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][200],
+#     ]
+#     gold[40]["diag_200"][0] = gold[40]["diag_200"][0][~np.isnan(gold[40]["diag_200"][1])]
+#     gold[40]["diag_200"][1] = gold[40]["diag_200"][1][~np.isnan(gold[40]["diag_200"][1])]
+#     gold[40]["diag_300"] = [
+#         df.iloc[6:, 0].to_numpy().astype(np.float32),
+#         df.iloc[6:, 5].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][300],
+#     ]
+#     gold[40]["diag_300"][0] = gold[40]["diag_300"][0][~np.isnan(gold[40]["diag_300"][1])]
+#     gold[40]["diag_300"][1] = gold[40]["diag_300"][1][~np.isnan(gold[40]["diag_300"][1])]
+#     return gold
+
+
+
+
 
 
 def import_gold_beam_data():
-    # Read gold beam PDDs and crossline profiles. Profiles are scaled by the PDD at the profile depth.
-    gold = {}
-    df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 1.5cm")
-    fss = [3, 4, 6, 8, 10, 20, 30, 40]
-    # ofs = [0.838663, 0.874284, 0.92817, 0.969307, 1.0, 1.083025, 1.113093, 1.132091]  # 6FFF
-    ofs = [0.827548, 0.862568, 0.917877, 0.965234, 1.0, 1.102564, 1.144229, 1.178926]  # 6MV
+
+    mcc_file_path = "6X_6499.mcc"
+    fss = [1, 2, 4, 6, 8, 10, 15, 20, 40]
+    ofs = [0.71820, 0.79250, 0.862568, 0.91790, 0.96520, 1.0, 1.05420, 1.10260, 1.17890]  # 6MV
+    meas = {}
     for i, v in enumerate(fss):
-        gold[v] = {}
-        gold[v]["of"] = ofs[i]
-        df = pd.read_excel(gold_data_file, sheet_name="Open Field Depth Dose")
-        gold[v]["pdd"] = [
-            df.iloc[5:, 0].to_numpy().astype(np.float32),
-            df.iloc[5:, i + 1].to_numpy().astype(np.float32) / 100,
-        ]
-        df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 1.5cm")
-        gold[v]["prof_15"] = [
-            df.iloc[7:, 0].to_numpy().astype(np.float32),
-            df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][15],
-        ]
-        df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 5cm")
-        gold[v]["prof_50"] = [
-            df.iloc[7:, 0].to_numpy().astype(np.float32),
-            df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][50],
-        ]
-        df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 10cm")
-        gold[v]["prof_100"] = [
-            df.iloc[7:, 0].to_numpy().astype(np.float32),
-            df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][100],
-        ]
-        df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 20cm")
-        gold[v]["prof_200"] = [
-            df.iloc[7:, 0].to_numpy().astype(np.float32),
-            df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][200],
-        ]
-        df = pd.read_excel(gold_data_file, sheet_name="Open Field Profiles at 30cm")
-        gold[v]["prof_300"] = [
-            df.iloc[7:, 0].to_numpy().astype(np.float32),
-            df.iloc[7:, i + 1].to_numpy().astype(np.float32) / 100 * gold[v]["pdd"][1][300],
-        ]
-    df = pd.read_excel(gold_data_file, sheet_name="Diagonal Profiles")
-    gold[40]["diag_15"] = [
-        df.iloc[6:, 0].to_numpy().astype(np.float32),
-        df.iloc[6:, 1].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][15],
-    ]
-    gold[40]["diag_15"][0] = gold[40]["diag_15"][0][~np.isnan(gold[40]["diag_15"][1])]
-    gold[40]["diag_15"][1] = gold[40]["diag_15"][1][~np.isnan(gold[40]["diag_15"][1])]
-    gold[40]["diag_50"] = [
-        df.iloc[6:, 0].to_numpy().astype(np.float32),
-        df.iloc[6:, 2].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][50],
-    ]
-    gold[40]["diag_50"][0] = gold[40]["diag_50"][0][~np.isnan(gold[40]["diag_50"][1])]
-    gold[40]["diag_50"][1] = gold[40]["diag_50"][1][~np.isnan(gold[40]["diag_50"][1])]
-    gold[40]["diag_100"] = [
-        df.iloc[6:, 0].to_numpy().astype(np.float32),
-        df.iloc[6:, 3].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][100],
-    ]
-    gold[40]["diag_100"][0] = gold[40]["diag_100"][0][~np.isnan(gold[40]["diag_100"][1])]
-    gold[40]["diag_100"][1] = gold[40]["diag_100"][1][~np.isnan(gold[40]["diag_100"][1])]
-    gold[40]["diag_200"] = [
-        df.iloc[6:, 0].to_numpy().astype(np.float32),
-        df.iloc[6:, 4].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][200],
-    ]
-    gold[40]["diag_200"][0] = gold[40]["diag_200"][0][~np.isnan(gold[40]["diag_200"][1])]
-    gold[40]["diag_200"][1] = gold[40]["diag_200"][1][~np.isnan(gold[40]["diag_200"][1])]
-    gold[40]["diag_300"] = [
-        df.iloc[6:, 0].to_numpy().astype(np.float32),
-        df.iloc[6:, 5].to_numpy().astype(np.float32) / 100 * gold[40]["pdd"][1][300],
-    ]
-    gold[40]["diag_300"][0] = gold[40]["diag_300"][0][~np.isnan(gold[40]["diag_300"][1])]
-    gold[40]["diag_300"][1] = gold[40]["diag_300"][1][~np.isnan(gold[40]["diag_300"][1])]
+        meas[v] = {}
+        meas[v]["of"] = ofs[i]
+        meas[v]["pdd"] = []
+        meas[v]["prof_15"] = []
+        meas[v]["prof_50"] = []
+        meas[v]["prof_100"] = []
+        meas[v]["prof_200"] = []
+        meas[v]["prof_300"] = []
+    meas[40]["diag_15"] = []
+    meas[40]["diag_50"] = []
+    meas[40]["diag_100"] = []
+    meas[40]["diag_200"] = []
+    meas[40]["diag_300"] = []
+
+    with open(mcc_file_path, "r") as f:
+        lines = f.readlines()
+        for i, line in enumerate(lines):
+            if "BEGIN_SCAN" in line:
+                i_start = i + 1
+            if "END_SCAN" in line:
+                i_end = i
+                scan_dict = {}
+                data_x = []
+                data_y = []
+                raw_scan_data = lines[i_start:i_end]
+                for l in raw_scan_data:
+                    key = l.split("=")[0]
+                    try:
+                        value = l.split("=")[1]
+                    except IndexError:
+                        data = key.split()
+                        if data[0] in ["BEGIN_DATA", "END_DATA", "BEGIN_SCAN", "END_SCAN"]:
+                            continue
+                        else:
+                            data_x.append(float(data[0]))
+                            data_y.append(float(data[1]))
+                            continue
+                    scan_dict[key.strip()] = value.strip()
+                scan_dict["DATA_X"] = np.array(data_x)
+                scan_dict["DATA_Y"] = np.array(data_y)
+                fs = round(float(scan_dict["FIELD_CROSSPLANE"]) / 10)              
+                if scan_dict["SCAN_CURVETYPE"] == "PDD":
+                    meas[fs]["pdd"] = [
+                        scan_dict["DATA_X"] / 10,
+                        scan_dict["DATA_Y"] / np.max(scan_dict["DATA_Y"]),
+                    ]
+                elif scan_dict["SCAN_CURVETYPE"] == "CROSSPLANE_PROFILE":
+                    if scan_dict["SCAN_DIAGONAL"] == "NOT_DIAGONAL":
+                        prefix = "prof"
+                    else:
+                        prefix = "diag"
+                    depth = round(float(scan_dict["SCAN_DEPTH"]))
+                    key = f"{prefix}_{depth}"
+                    i_zero, = np.where(scan_dict["DATA_X"] == 0)
+                    meas[fs][key] = [
+                        scan_dict["DATA_X"] / 10,
+                        scan_dict["DATA_Y"] / scan_dict["DATA_Y"][i_zero] * meas[fs]["pdd"][1][depth],
+                    ]
+    gold = meas
     return gold
 
 
@@ -99,7 +174,7 @@ def run(fs, grid, exam, settings):
     source.gantry = 0.0
     source.collimator = 90.0
     block = Block(settings=settings)
-    block.set_square(fs)
+    block.set_square(fs, settings)
     fluence_map_pri, fluence_map_sec = block.get_fluence_maps()
     dose = Grid(corner=grid.corner, resolution=grid.resolution, num_voxels=grid.num_voxels)
     fluence_grid = calculate_fluence(
@@ -199,7 +274,7 @@ def calculate_doses(fss, exam, settings):
 
 
 def difference_in_pdds(calc, gold):
-    diff = 0.0
+    diff_sum = 0.0
     for fs in calc.keys():
         calc_pdd_interp = np.interp(
             gold[fs]["pdd"][0], calc[fs]["pdd"][0], calc[fs]["pdd"][1] / calc[fs]["pdd"][1].max()
@@ -211,8 +286,16 @@ def difference_in_pdds(calc, gold):
         calc_pdd_interp = calc_pdd_interp[10:]
         gold_pdd = gold_pdd[10:]
 
-        diff += np.sum(np.abs(calc_pdd_interp - gold_pdd) ** 2)
-    return diff
+        # Clip off approximate tail end-effects
+        calc_pdd_interp = calc_pdd_interp[20:]
+        gold_pdd = gold_pdd[20:]
+
+        # Weight shallow depthd more importantly than deeper depths
+        diff = calc_pdd_interp - gold_pdd
+        diff[0:80] *= 1.5
+
+        diff_sum += np.sum(np.abs(diff) ** 2)
+    return diff_sum
 
 
 def optimise_pdd(x, exam, gold):
@@ -226,10 +309,14 @@ def optimise_pdd(x, exam, gold):
     N = np.sum(energy_weights)
     energy_weights /= N
     energy_weights /= energies
-    settings["energy_spectrum"]["weights_3"] = energy_weights.tolist()
+    settings["energy_spectrum"]["weights_2"] = energy_weights.tolist()
     settings["energy_spectrum"]["weights_10"] = energy_weights.tolist()
     settings["energy_spectrum"]["weights_40"] = energy_weights.tolist()
 
+    # settings["sources"]["pri_s"] = x[2]
+    # settings["sources"]["sec_s"] = 1 - x[2]
+   
+   
 
     # mu = x[0]
     # sigma = x[1]
@@ -242,7 +329,26 @@ def optimise_pdd(x, exam, gold):
     # N = np.sum(energy_weights)
     # energy_weights /= N
     # energy_weights *= energies
-    # settings["energy_spectrum"]["weights_3"] = energy_weights.tolist()
+    # settings["energy_spectrum"]["weights_2"] = energy_weights.tolist()
+
+    # c1 = x[0]
+    # c2 = x[1]
+    # energy_weights = energies ** (c1) * np.exp(-c2 * energies)
+    # N = np.sum(energy_weights)
+    # energy_weights /= N
+    # energy_weights /= energies
+    # settings["energy_spectrum"]["weights_2"] = energy_weights.tolist()
+    # settings["energy_spectrum"]["weights_10"] = energy_weights.tolist()
+    # settings["energy_spectrum"]["weights_40"] = energy_weights.tolist()
+    # settings["sources"]["pri_s"] = x[2]
+    # settings["sources"]["pri_x"] = x[3]
+    # settings["sources"]["pri_y"] = x[3]
+    # settings["sources"]["pri_z"] = x[4]
+    # settings["sources"]["sec_s"] = 1 - x[2]
+    # settings["sources"]["sec_x"] = x[5]
+    # settings["sources"]["sec_y"] = x[5]
+    # settings["sources"]["sec_z"] = x[6]
+
 
     # Calc doses
     fss = [40]
@@ -281,10 +387,15 @@ exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
 #     (0.0, 1.0),
 #     (0.0, 1.0)
 # ]
-# x0 = [2.35476884, 1.3858963] # 3 x 3
-# x0 = [1.33441245, 0.97771809]  # 10 x 10
-x0 = [2.46958337, 1.7451692]  # 40 x 40
-bounds = [(0.01, 2.5), (0.01, 2.5)]
+# x0 = [1.5909093, 1.04052114] # 2 x 2
+# x0 = [1.50841771, 1.05787693]  # 10 x 10
+x0 = [1.50841771, 1.05787693]  # 40 x 40
+bounds = [(0.01, 5.0), (0.01, 5.0)]
+
+# x0 = [1.50841771, 1.05787693, 0.9]
+# bounds = [(0.01, 5.0), (0.01, 5.0), (0.5, 1.0)]
+# x0 = [1.50841771, 1.05787693, 0.9, 0.1, 0.5, 8.0, 10.0]
+# bounds = [(0.01, 5.0), (0.01, 5.0), (0.01, 9.9), (0.01, 5.0), (0.01, 5.0), (0.01, 25.0), (0.01, 30.0)]
 result = minimize(optimise_pdd, x0, args=(exam, gold), method="Nelder-Mead", bounds=bounds)
 
 # %%
@@ -367,7 +478,7 @@ def calculate_ofcs(fss, exam, settings, gold):
 gold = import_gold_beam_data()
 exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
 settings = toml.load(toml_file)
-fss = [3, 4, 6, 8, 10, 20, 30, 40]
+fss = [2, 4, 6, 8, 10, 15, 20, 40]
 calc = calculate_ofcs(fss, exam, settings, gold)
 for fs in calc.keys():
     calc[fs]["ofc"] /= calc[10]["ofc"]  # Normalise to 10 x 10
@@ -528,31 +639,12 @@ result = minimize(optimise_penumbras, x0, args=(exam, gold), method="Nelder-Mead
 
 
 # %%
-settings = toml.load(toml_file)
-exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
-fig, ax = plt.subplots(1, 1, figsize=(16, 12))
-# gold = import_gold_beam_data()
-for i in [(0, 0.5), (1, 1.0), (3, 2.0), (7, 4.0), (11, 6.0)]:
-    energy_weights = np.zeros(12, dtype=np.float32)
-    energy_weights[i[0]] = 1.0
-    settings["energy_spectrum"]["weights"] = energy_weights.tolist()
-    fs = 20
-    calc = calculate_doses([fs], exam, settings)
-    # ax.plot(gold[fs]["pdd"][0], gold[fs]["pdd"][1] / gold[fs]["pdd"][1][100], label="Measured PDD")
-
-    ax.plot(
-        calc[fs]["pdd"][0], calc[fs]["pdd"][1] / calc[fs]["pdd"][1].max(), label=f"{i[1]} MeV"
-    )
-ax.legend()
-ax.grid()
-
-# %%
 # Profile and PDD agreement plots
 gold = import_gold_beam_data()
 exam = Exam(dicom_dir="40", hu_lut_path="Siemens_Confidence.toml")
 settings = toml.load(toml_file)
 # fss = [3, 4, 6, 8, 10, 20, 30, 40]
-fss = [20]
+fss = [2, 6, 10, 20, 40]
 calc = calculate_doses(fss, exam, settings)
 
 #%%
@@ -638,16 +730,16 @@ plt.style.use('dark_background')
 lines = []
 fig, ax = plt.subplots(1, 1, figsize=(14, 8))
 for fs in fss:
-    line1, = ax.plot(gold[fs]["prof_15"][0], gold[fs]["prof_15"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
-    line2, = ax.plot(calc[fs]["prof_15"][0], calc[fs]["prof_15"][1], '-', color="#3535ff", label='Calculated')
-    ax.plot(gold[fs]["prof_50"][0], gold[fs]["prof_50"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
-    ax.plot(calc[fs]["prof_50"][0], calc[fs]["prof_50"][1], '-', color='#3535ff', label='Calculated')    
+    # line1, = ax.plot(gold[fs]["prof_15"][0], gold[fs]["prof_15"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
+    # line2, = ax.plot(calc[fs]["prof_15"][0], calc[fs]["prof_15"][1], '-', color="#3535ff", label='Calculated')
+    # ax.plot(gold[fs]["prof_50"][0], gold[fs]["prof_50"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
+    # ax.plot(calc[fs]["prof_50"][0], calc[fs]["prof_50"][1], '-', color='#3535ff', label='Calculated')    
     ax.plot(gold[fs]["prof_100"][0], gold[fs]["prof_100"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
     ax.plot(calc[fs]["prof_100"][0], calc[fs]["prof_100"][1], '-', color='#3535ff', label='Calculated')   
-    ax.plot(gold[fs]["prof_200"][0], gold[fs]["prof_200"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
-    ax.plot(calc[fs]["prof_200"][0], calc[fs]["prof_200"][1], '-', color='#3535ff', label='Calculated')   
-    ax.plot(gold[fs]["prof_300"][0], gold[fs]["prof_300"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
-    ax.plot(calc[fs]["prof_300"][0], calc[fs]["prof_300"][1], '-', color='#3535ff', label='Calculated')               
+    # ax.plot(gold[fs]["prof_200"][0], gold[fs]["prof_200"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
+    # ax.plot(calc[fs]["prof_200"][0], calc[fs]["prof_200"][1], '-', color='#3535ff', label='Calculated')   
+    # ax.plot(gold[fs]["prof_300"][0], gold[fs]["prof_300"][1]/gold[fs]["pdd"][1][100]*gold[fs]["of"] * pdd10, color='red', label='Measured')
+    # ax.plot(calc[fs]["prof_300"][0], calc[fs]["prof_300"][1], '-', color='#3535ff', label='Calculated')               
     lines.append(line1)
     lines.append(line2)
     ax.set_facecolor("#1f1f1f")

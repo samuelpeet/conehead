@@ -273,15 +273,6 @@ def calculate_dose(
     # )
 
 
-    oas_oads = settings["off_axis_softening"]["oads"]
-    oas_factors = settings["off_axis_softening"]["factors"]
-    oas_oads_interp_dx = 0.5
-    oas_oads_interp_max = 40.0
-    oas_oads_interp = np.arange(0, oas_oads_interp_max, oas_oads_interp_dx)
-
-    fudge_factor = 0.1
-
-    oas_factors_interp = np.interp(oas_oads_interp, oas_oads, oas_factors).astype(np.float32) * fudge_factor
 
     gpu.oad(
         oad_grid=oad_grid,
@@ -303,6 +294,20 @@ def calculate_dose(
         density_grid=density_grid,
         source_position=source.position,
     )
+
+
+
+    oas_oads = settings["off_axis_softening"]["oads"]
+    oas_factors_2 = settings["off_axis_softening"]["factors_2"]
+    oas_factors_10 = settings["off_axis_softening"]["factors_10"]
+    oas_factors_40 = settings["off_axis_softening"]["factors_40"]
+    oas_factors = np.zeros_like(oas_oads, dtype=np.float32)
+    for i in range(len(oas_oads)):
+        oas_factors[i] = np.interp(equiv_square, [2, 10, 40], [oas_factors_2[i], oas_factors_10[i], oas_factors_40[i]])
+    oas_oads_interp_dx = 0.5
+    oas_oads_interp_max = 40.0
+    oas_oads_interp = np.arange(0, oas_oads_interp_max, oas_oads_interp_dx)
+    oas_factors_interp = np.interp(oas_oads_interp, oas_oads, oas_factors).astype(np.float32)
 
     gpu.terma_spectral(
         terma_grid=terma_grid,

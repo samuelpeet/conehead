@@ -203,7 +203,7 @@ class Block:
                 (self.xnum, self.ynum), dtype=np.float32
             )
 
-    def set_square(self, length: np.float32):
+    def set_square(self, length: np.float32, settings: dict):
         """Set a simple square aperture in the block plane.
 
         This helper is mainly intended for tests and simple QA where a
@@ -214,20 +214,45 @@ class Block:
         length : float
             Side length (cm) of the square opening centred on the block.
         """
-        # Clear previous aperture
-        self.values.fill(np.float32(0))
 
-        # Set square collimator opening
-        x1 = int((self.xnum / 2) - (length / 2) * self.xres)
-        x2 = int((self.xnum / 2) + (length / 2) * self.xres)
-        y1 = int((self.ynum / 2) - (length / 2) * self.yres)
-        y2 = int((self.ynum / 2) + (length / 2) * self.yres)
-        self.values[x1:x2, y1:y2] = np.float32(1)
+        self.values.fill(np.float32(1))
 
-        self.x1_jaw_pos = -length / 2
-        self.x2_jaw_pos = length / 2
-        self.y1_jaw_pos = -length / 2
-        self.y2_jaw_pos = length / 2
+        jaw_x_positions = np.floor([-length / 2 * 100, length / 2 * 100])
+        jaw_y_positions = np.floor([-length / 2 * 100, length / 2 * 100])
+        x_jaw_offset = settings["collimators"]["x_jaw_offset"] * 100
+        y_jaw_offset = settings["collimators"]["y_jaw_offset"] * 100
+
+        # Offset jaw positions by the configured jaw offsets
+        jaw_x_positions[0] -= x_jaw_offset
+        jaw_x_positions[1] += x_jaw_offset
+        jaw_y_positions[0] -= y_jaw_offset
+        jaw_y_positions[1] += y_jaw_offset
+
+        # Include jaws in block plane
+        x_trans = settings["collimators"]["x_jaw_trans"]
+        y_trans = settings["collimators"]["y_jaw_trans"]
+        self.values[:, : int(2000 + jaw_x_positions[0])] *= x_trans
+        self.values[:, int(2000 + jaw_x_positions[1]) :] *= x_trans
+        self.values[: int(2000 + jaw_y_positions[0]), :] *= y_trans
+        self.values[int(2000 + jaw_y_positions[1]) :, :] *= y_trans
+
+
+
+
+        # # Clear previous aperture
+        # self.values.fill(np.float32(0))
+
+        # # Set square collimator opening
+        # x1 = int((self.xnum / 2) - (length / 2) * self.xres)
+        # x2 = int((self.xnum / 2) + (length / 2) * self.xres)
+        # y1 = int((self.ynum / 2) - (length / 2) * self.yres)
+        # y2 = int((self.ynum / 2) + (length / 2) * self.yres)
+        # self.values[x1:x2, y1:y2] = np.float32(1)
+
+        # self.x1_jaw_pos = -length / 2
+        # self.x2_jaw_pos = length / 2
+        # self.y1_jaw_pos = -length / 2
+        # self.y2_jaw_pos = length / 2
 
         self.wedge_angle = None
 
@@ -250,12 +275,19 @@ class Block:
             Machine settings dictionary (expects MLC geometry and jack
             jaw transmission entries).
         """
-
         # Convert from cm to tenths of a mm
         mlc_boundaries = control_point.mlc_boundaries * 100
         mlc_ends = np.floor(control_point.mlc_positions * 100)
         jaw_x_positions = np.floor(control_point.jaw_x_positions * 100)
         jaw_y_positions = np.floor(control_point.jaw_y_positions * 100)
+        x_jaw_offset = settings["collimators"]["x_jaw_offset"] * 100
+        y_jaw_offset = settings["collimators"]["y_jaw_offset"] * 100
+
+        # Offset jaw positions by the configured jaw offsets
+        jaw_x_positions[0] -= x_jaw_offset
+        jaw_x_positions[1] += x_jaw_offset
+        jaw_y_positions[0] -= y_jaw_offset
+        jaw_y_positions[1] += y_jaw_offset
 
         # Identify A and B bank ends
         mlc_offset = np.float32(

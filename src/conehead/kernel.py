@@ -209,12 +209,12 @@ class Kernel:
 
         # Interpolate energy spectrum weights based on field size
         energies = np.asarray(settings["energy_spectrum"]["energies"], dtype=np.float32)
-        weights_3 = np.asarray(settings["energy_spectrum"]["weights_3"], dtype=np.float32)
+        weights_2 = np.asarray(settings["energy_spectrum"]["weights_2"], dtype=np.float32)
         weights_10 = np.asarray(settings["energy_spectrum"]["weights_10"], dtype=np.float32)
         weights_40 = np.asarray(settings["energy_spectrum"]["weights_40"], dtype=np.float32)
         self.weights = np.zeros_like(energies, dtype=np.float32)
         for i in range(len(energies)):
-            self.weights[i] = np.interp(field_size, [3, 10, 40], [weights_3[i], weights_10[i], weights_40[i]])
+            self.weights[i] = np.interp(field_size, [2, 10, 40], [weights_2[i], weights_10[i], weights_40[i]])
         mu_w = mu_water(energies).astype(np.float32)
 
         spectrum_depth_res_cm = np.float32(0.2)
